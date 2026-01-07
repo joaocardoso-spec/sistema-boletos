@@ -3,10 +3,9 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import time
-import re
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Sistema de Boletos v17", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v11", layout="wide")
 
 st.markdown("""
     <style>
@@ -26,18 +25,7 @@ def init_connection():
     return gspread.authorize(creds)
 
 def normalizar_id(valor):
-    if not valor: return ""
-    v = str(valor).replace(',', '.').strip()
-    if v.endswith('.0'): v = v[:-2]
-    return v
-
-def extrair_link_da_formula(texto):
-    """Pinça o link de dentro de =HYPERLINK(\"link\"; \"texto\")"""
-    t = str(texto).strip()
-    if not t.startswith('='): return t
-    # Busca a primeira ocorrência de algo entre aspas que comece com http
-    match = re.search(r'[\"\'](http[s]?://.+?)[\"\']', t)
-    return match.group(1) if match else t
+    return str(valor).replace(',', '.').strip()
 
 def limpar_valor_monetario(texto):
     if not texto: return 0
@@ -79,18 +67,18 @@ else:
     key_norm = normalizar_id(key_orig)
 
     st.divider()
-    st.markdown("#### ✍️ Lançamento de Dados")
+    st.markdown("#### ✍️ Preenchimento de Dados")
     
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("🟦 Meta Ads")
-        m_met = st.selectbox("Método Pagamento Meta", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v1")
+        m_met = st.selectbox("Método Pagamento", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v1")
         m_cre = st.text_input("Crédito Atual Meta", placeholder="Ex: 1.500,00", key="v2")
         m_dat = st.text_input("Data do Saldo Meta", placeholder="DD/MM", key="v3")
         m_val = st.text_input("Gasto Diário Meta", placeholder="Ex: 50,00", key="v4")
     with c2:
         st.subheader("🟩 Google Ads")
-        g_met = st.selectbox("Método Pagamento Google", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v5")
+        g_met = st.selectbox("Método Pagamento ", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v5")
         g_cre = st.text_input("Crédito Atual Google", placeholder="Ex: 1.500,00", key="v6")
         g_dat = st.text_input("Data do Saldo Google", placeholder="DD/MM", key="v7")
         g_val = st.text_input("Gasto Diário Google", placeholder="Ex: 50,00", key="v8")
@@ -98,7 +86,7 @@ else:
     if st.button("💾 SALVAR E GERAR DIAGNÓSTICO"):
         with st.spinner("Sincronizando..."):
             try:
-                # 1. SALVAR NA INPUT
+                # 1. SALVAR NA INPUT (Colunas I até P)
                 cell_in = sh_input.find(key_orig, in_column=2)
                 r_in = cell_in.row
                 sh_input.update(f"I{r_in}:P{r_in}", [[m_met, limpar_valor_monetario(m_cre), m_dat, limpar_valor_monetario(m_val),
@@ -118,6 +106,7 @@ else:
                 if match_idx == -1:
                     st.error("❌ Key não encontrada na aba OUTPUT.")
                 else:
+                    # Copia Y(24) para Z(25) e AK(36) para AL(37)
                     sh_output.update_cell(match_idx, 26, out_row_data[24]) 
                     sh_output.update_cell(match_idx, 38, out_row_data[36]) 
                     
@@ -126,23 +115,27 @@ else:
 
                     st.success(f"✅ Dados de {cliente_sel} atualizados!")
                     
-                    # --- DIAGNÓSTICO (Sua Lógica Original) ---
+                    # --- DIAGNÓSTICO COM EXPLICAÇÃO DE DIFERENÇAS ---
                     st.markdown("### 📊 Auditoria de Cheques")
-                    cols = st.columns(5)
-                    ck2_status, ck3_status = final_row[12], final_row[15]
+                    cols = st.columns(6)
                     
+                    # Função de validação EXATA
+                    def is_ok(val):
+                        return str(val).strip().upper() == "OK"
+
+                    # Mapeamento de Cheques
                     checks = [
-                        ("Check 1 (FB/GL)", f"{final_row[8]} / {final_row[9]}", ""),
-                        ("Check 2 (Mídia)", ck2_status, f"Acordado: {final_row[10]} | Lançado: {final_row[11]}" if "OK" not in str(ck2_status).upper() else ""),
-                        ("Check 3 (Emissão)", ck3_status, f"Acordado: {final_row[13]} | Soma: {final_row[14]}" if "OK" not in str(ck3_status).upper() else ""),
-                        ("Check 4 (Meta)", final_row[17], "Saldo não durará até dia 10" if "OK" not in str(final_row[17]).upper() else ""),
-                        ("Check 4 (Google)", final_row[19], "Saldo não durará até dia 10" if "OK" not in str(final_row[19]).upper() else "")
+                        ("Check 1: FB", final_row[8], ""), # Col I
+                        ("Check 1: GL", final_row[9], ""), # Col J
+                        ("Check 2 (Mídia)", final_row[12], f"Acordado: {final_row[10]} | Lançado: {final_row[11]}" if not is_ok(final_row[12]) else ""), # Col M
+                        ("Check 3 (Emissão)", final_row[15], f"Acordado: {final_row[13]} | Soma: {final_row[14]}" if not is_ok(final_row[15]) else ""), # Col P
+                        ("Check 4 (Meta)", final_row[17], "Saldo não durará até dia 10" if not is_ok(final_row[17]) else ""), # Col R
+                        ("Check 4 (Google)", final_row[19], "Saldo não durará até dia 10" if not is_ok(final_row[19]) else "") # Col T
                     ]
                     
                     for i, (name, val, diff) in enumerate(checks):
-                        # Mantido exatamente como você validou
-                        is_ok = "OK" in str(val).upper()
-                        cl = "ok-card" if is_ok else "nok-card"
+                        ok_status = is_ok(val)
+                        cl = "ok-card" if ok_status else "nok-card"
                         with cols[i]:
                             st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}
                                             <div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
@@ -150,38 +143,30 @@ else:
                     st.divider()
                     l_c, r_c = st.columns(2)
                     with l_c:
-                        st.metric("A Emitir (Meta Ads)", f"R$ {final_row[24]}")
-                        st.metric("A Emitir (Google Ads)", f"R$ {final_row[36]}")
-                        if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}")
-                        if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}")
+                        st.metric("A Emitir (Meta Ads)", f"R$ {final_row[24]}") # Col Y
+                        st.metric("A Emitir (Google Ads)", f"R$ {final_row[36]}") # Col AK
+                        if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}") # Col AB
+                        if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}") # Col AN
                     
                     with r_c:
-                        # --- BUSCA DE LINKS EM FÓRMULAS ---
+                        # Busca de Comunicação por API (.find) para precisão total
                         st.markdown("**Ações de Envio:**")
-                        # Pega o intervalo A:L trazendo as fórmulas brutas
-                        comm_raw = sh_comm.get('A1:L500', value_render_option='FORMULA')
-                        comm_match = None
-                        
-                        for rc in comm_raw:
-                            if len(rc) > 1 and normalizar_id(rc[1]) == key_norm:
-                                comm_match = rc
-                                break
-                        
-                        if comm_match:
-                            # WhatsApp (Index 10 = K) | E-mail (Index 11 = L)
-                            wpp_f = comm_match[10] if len(comm_match) > 10 else ""
-                            mail_f = comm_match[11] if len(comm_match) > 11 else ""
+                        try:
+                            cell_comm = sh_comm.find(key_orig, in_column=2)
+                            row_comm_idx = cell_comm.row
+                            comm_vals = sh_comm.row_values(row_comm_idx)
                             
-                            wpp_url = extrair_link_da_formula(wpp_f)
-                            mail_url = extrair_link_da_formula(mail_f)
+                            wpp = str(comm_vals[10]).strip() # Col K
+                            mail = str(comm_vals[11]).strip() # Col L
                             
-                            if wpp_url.startswith("http"): st.link_button("📲 Enviar via WhatsApp", wpp_url)
-                            else: st.warning("⚠️ Link de WhatsApp não extraído da fórmula.")
+                            if wpp.startswith("http"): st.link_button("📲 Enviar via WhatsApp", wpp)
+                            else: st.warning("⚠️ WhatsApp não cadastrado.")
                             
-                            if mail_url.startswith("http"): st.link_button("📧 Enviar via E-mail", mail_url)
-                            else: st.warning("⚠️ Link de E-mail não extraído da fórmula.")
-                        else:
-                            st.warning("ℹ️ Dados de contato não localizados na aba de Comunicação.")
+                            if mail.startswith("http"): st.link_button("📧 Enviar via E-mail", mail)
+                            else: st.warning("⚠️ E-mail não cadastrado.")
+                        except:
+                            st.warning("ℹ️ Este cliente não possui dados na aba de Comunicação.")
                             
             except Exception as e:
                 st.error(f"Erro no processamento: {e}")
+

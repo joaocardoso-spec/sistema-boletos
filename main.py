@@ -18,56 +18,59 @@ def init_connection():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = st.secrets["gcp_service_account"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+    # Mostra o e-mail que o sistema está usando para você conferir
+    st.sidebar.write(f"🔐 Conectado como: \n`{creds_dict['client_email']}`")
     return gspread.authorize(creds)
 
 try:
     gc = init_connection()
     
-    # --- COLOQUE O ID DA SUA PLANILHA AQUI ---
-    # O ID é a parte entre /d/ e /edit na URL da sua planilha
+    # ID DA PLANILHA (Corrigido com aspas)
     SPREADSHEET_ID = "1zOof6YDL4U8hYMiFi5zt4V_alYK6EcRvV3QKERvNlhA" 
     
     ss = gc.open_by_key(SPREADSHEET_ID)
     
-    # Acessando as abas
     sh_input = ss.worksheet("INPUT - BOLETOS")
     sh_output = ss.worksheet("OUTPUT - BOLETOS")
     sh_comm = ss.worksheet("COMUNICACAO - CLIENTE")
     
 except Exception as e:
     st.error(f"❌ ERRO DE CONEXÃO: {repr(e)}")
-    st.info("Verifique se o ID da planilha está correto e se o e-mail do serviço foi compartilhado como EDITOR.")
+    st.markdown("""
+    ### 🛠️ Como resolver este erro:
+    1. No menu lateral, **copie o e-mail** que aparece abaixo de 'Conectado como'.
+    2. Vá na sua Planilha Google > Botão **Compartilhar**.
+    3. Cole esse e-mail e verifique se ele está como **Editor**.
+    4. Clique em 'Concluído' e dê **Reboot** no app.
+    """)
     st.stop()
 
-# --- FUNÇÃO PARA LER DADOS A PARTIR DA LINHA 7 ---
+# Função para ler a partir da linha 7
 def get_data_from_row_7(worksheet):
-    # Puxa todos os valores da aba
     all_values = worksheet.get_all_values()
-    # A linha 7 é o índice 6 (porque começa em 0)
-    headers = all_values[6] 
-    data = all_values[7:]
+    if len(all_values) < 7: return pd.DataFrame()
+    headers = all_values[6] # Linha 7
+    data = all_values[7:]  # Dados começam na 8
     return pd.DataFrame(data, columns=headers)
 
 try:
     df_input = get_data_from_row_7(sh_input)
-    # Remove linhas onde a Key está vazia
-    df_input = df_input[df_input['Key'] != ""]
+    df_input = df_input[df_input['Clientes'] != ""]
 except Exception as e:
-    st.error(f"❌ ERRO AO LER ABAS: {repr(e)}")
-    st.write("DICA: Verifique se os nomes das abas estão idênticos na planilha e no código.")
+    st.error(f"❌ ERRO AO LER DADOS: {repr(e)}")
     st.stop()
 
-# --- INTERFACE ---
 st.title("🚀 Sistema Operacional de Boletos")
 
-squads = sorted([s for s in df_input['SQUAD'].unique() if s and s != '-' and s != ""])
+# Filtros e Interface
+squads = sorted([s for s in df_input['SQUAD'].unique() if s and s not in ["-", ""]])
 selected_squad = st.sidebar.selectbox("Filtrar por SQUAD:", squads)
 
 status_permitidos = ["OK", "NÃO INICIOU", "DUPLICADO", "ENCERRAR"]
 df_filtered = df_input[(df_input['SQUAD'] == selected_squad) & (df_input['Status'].isin(status_permitidos))]
 
 if df_filtered.empty:
-    st.warning(f"Nenhum cliente ativo encontrado para a SQUAD: {selected_squad}")
+    st.warning(f"Nenhum cliente ativo encontrado para {selected_squad}")
 else:
     cliente_selecionado = st.selectbox("Selecione o Cliente:", df_filtered['Clientes'].tolist())
     dados_c = df_filtered[df_filtered['Clientes'] == cliente_selecionado].iloc[0]
@@ -75,7 +78,6 @@ else:
 
     st.divider()
     
-    # Inputs (Meta e Google)
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("🟦 Meta Ads")
@@ -93,28 +95,22 @@ else:
 
     if st.button("SALVAR E PROCESSAR"):
         with st.spinner("Sincronizando..."):
-            # Localiza a linha correta pela Key (Coluna B)
             cell = sh_input.find(str(id_cliente), in_column=2)
             row_idx = cell.row
-            
-            # Atualiza colunas J até Q (Método até Valor Google)
             valores = [[m_metodo, m_credito, m_data, m_valor, g_metodo, g_credito, g_data, g_valor]]
             sh_input.update(f"J{row_idx}:Q{row_idx}", valores)
             
-            time.sleep(3) # Tempo para a planilha calcular
+            time.sleep(3)
             
-            # Puxa diagnósticos do OUTPUT e COMUNICACAO
             df_out = get_data_from_row_7(sh_output)
             out_c = df_out[df_out['Key'] == id_cliente].iloc[0]
             
             df_comm = get_data_from_row_7(sh_comm)
-            # Na aba de comunicação o título da coluna de ID parece ser 'ID' em vez de 'Key'
             id_col_comm = 'ID' if 'ID' in df_comm.columns else 'Key'
             comm_c = df_comm[df_comm[id_col_comm] == id_cliente].iloc[0]
 
-            st.success("✅ Dados atualizados!")
+            st.success("✅ Dados salvos!")
             
-            # Exibição dos Checks
             st.markdown("### 📊 Diagnóstico")
             res_cols = st.columns(4)
             for i, chk in enumerate(["CHECK 1", "CHECK 2", "CHECK 3", "CHECK 4"]):
@@ -127,7 +123,5 @@ else:
 
             st.divider()
             st.metric("Valor a Emitir Total", f"R$ {out_c.get('Valor a Emitir', '0,00')}")
-            
-            # Links de Ação
             st.markdown(f"**WhatsApp:** [Enviar Agora]({comm_c.get('Envio Whatsapp', '#')})")
             st.markdown(f"**E-mail:** [Enviar Agora]({comm_c.get('Envio E-mail', '#')})")

@@ -4,16 +4,17 @@ from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import time
 
-# --- CONFIGURAÇÃO VISUAL ---
-st.set_page_config(page_title="Gerador de Boletos v7", layout="wide")
+# --- CONFIGURAÇÃO ---
+st.set_page_config(page_title="Sistema de Boletos v10", layout="wide")
 
 st.markdown("""
     <style>
     .main { background-color: #0b0e14; color: #ffffff; }
     .stButton>button { background-color: #238636; color: white; width: 100%; font-weight: bold; height: 3.5em; border: none; }
-    .check-card { padding: 12px; border-radius: 8px; margin-bottom: 8px; font-weight: bold; text-align: center; font-size: 0.9em; }
+    .check-card { padding: 12px; border-radius: 8px; margin-bottom: 8px; font-weight: bold; text-align: center; font-size: 0.85em; min-height: 100px; display: flex; flex-direction: column; justify-content: center; }
     .ok-card { background-color: #1a2d1f; border: 1px solid #238636; color: #73d13d; }
     .nok-card { background-color: #2d1a1e; border: 1px solid #ff4b4b; color: #ff4b4b; }
+    .val-diff { font-size: 0.8em; color: #ffffff; margin-top: 5px; font-weight: normal; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -32,7 +33,7 @@ def limpar_valor_monetario(texto):
     try: return float(limpo)
     except: return 0
 
-# --- CONEXÃO ---
+# --- CARREGAMENTO ---
 try:
     gc = init_connection()
     SPREADSHEET_ID = "1zOof6YDL4U8hYMiFi5zt4V_alYK6EcRvV3QKERvNlhA"
@@ -41,118 +42,127 @@ try:
     sh_output = ss.worksheet("OUTPUT - BOLETOS")
     sh_comm = ss.worksheet("COMUNICACAO - CLIENTE")
 
-    # Input: Cabeçalho na Linha 4 (Índice 3)
     vals_in = sh_input.get_all_values()
     df_input = pd.DataFrame(vals_in[4:], columns=vals_in[3])
     df_input = df_input[df_input.iloc[:, 2] != ""].copy()
 except Exception as e:
-    st.error(f"Erro ao conectar com as abas: {e}")
+    st.error(f"Erro ao conectar com a planilha: {e}")
     st.stop()
 
 # --- INTERFACE ---
-st.title("🏦 Gestão de Faturamento e Boletos")
+st.title("🏦 Gestor de Boletos e Faturamento")
 
-# Filtro de SQUAD (Coluna F - Índice 5)
 squad_list = sorted([s for s in df_input.iloc[:, 5].unique() if s and s != "-"] )
-selected_squad = st.sidebar.selectbox("Selecione sua SQUAD", squad_list)
+selected_squad = st.sidebar.selectbox("Filtro SQUAD", squad_list)
 
 status_ops = ["OK", "NÃO INICIOU", "DUPLICADO", "ENCERRAR"]
 df_filtered = df_input[(df_input.iloc[:, 5] == selected_squad) & (df_input.iloc[:, 3].isin(status_ops))]
 
 if df_filtered.empty:
-    st.warning(f"Nenhum cliente disponível para a SQUAD {selected_squad}.")
+    st.warning(f"Sem clientes disponíveis para {selected_squad}.")
 else:
-    cliente_sel = st.selectbox("Escolha o Cliente:", df_filtered.iloc[:, 2].tolist())
+    cliente_sel = st.selectbox("Selecione o Cliente:", df_filtered.iloc[:, 2].tolist())
     row_sel = df_filtered[df_filtered.iloc[:, 2] == cliente_sel].iloc[0]
-    
-    key_original = str(row_sel.iloc[1]).strip()
-    key_normalizada = normalizar_id(key_original)
+    key_orig = str(row_sel.iloc[1]).strip()
+    key_norm = normalizar_id(key_orig)
 
     st.divider()
-    st.markdown("#### ✍️ Lançamento de Dados")
-    st.info("💡 Use **TAB** para navegar. O sistema só salva ao clicar no botão abaixo.")
+    st.markdown("#### ✍️ Preenchimento de Dados")
     
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("🟦 Meta Ads")
-        m_metodo = st.selectbox("Método Pagamento", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="met1")
-        m_credito = st.text_input("Crédito Atual Meta", placeholder="Ex: 1.500,00", key="met2")
-        m_data = st.text_input("Data do Saldo Meta", placeholder="DD/MM", key="met3")
-        m_valor = st.text_input("Gasto Diário Meta", placeholder="Ex: 50,00", key="met4")
+        m_met = st.selectbox("Método Pagamento", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v1")
+        m_cre = st.text_input("Crédito Atual Meta", placeholder="Ex: 1.500,00", key="v2")
+        m_dat = st.text_input("Data do Saldo Meta", placeholder="DD/MM", key="v3")
+        m_val = st.text_input("Gasto Diário Meta", placeholder="Ex: 50,00", key="v4")
     with c2:
         st.subheader("🟩 Google Ads")
-        g_metodo = st.selectbox("Método Pagamento", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="goo1")
-        g_credito = st.text_input("Crédito Atual Google", placeholder="Ex: 1.500,00", key="goo2")
-        g_data = st.text_input("Data do Saldo Google", placeholder="DD/MM", key="goo3")
-        g_valor = st.text_input("Gasto Diário Google", placeholder="Ex: 50,00", key="goo4")
+        g_met = st.selectbox("Método Pagamento ", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v5")
+        g_cre = st.text_input("Crédito Atual Google", placeholder="Ex: 1.500,00", key="v6")
+        g_dat = st.text_input("Data do Saldo Google", placeholder="DD/MM", key="v7")
+        g_val = st.text_input("Gasto Diário Google", placeholder="Ex: 50,00", key="v8")
 
-    if st.button("🚀 SALVAR DADOS E VERIFICAR CHEQUES"):
-        with st.spinner("Atualizando planilha..."):
+    if st.button("💾 SALVAR E GERAR DIAGNÓSTICO"):
+        with st.spinner("Sincronizando..."):
             try:
-                cell = sh_input.find(key_original, in_column=2)
-                r_idx = cell.row
-                
-                vals = [[m_metodo, limpar_valor_monetario(m_credito), m_data, limpar_valor_monetario(m_valor),
-                         g_metodo, limpar_valor_monetario(g_credito), g_data, limpar_valor_monetario(g_valor)]]
-                
-                # Atualiza I a P (Índices 9 a 16)
-                sh_input.update(f"I{r_idx}:P{r_idx}", vals, value_input_option='USER_ENTERED')
+                # 1. SALVAR NA INPUT (Colunas I até P)
+                cell_in = sh_input.find(key_orig, in_column=2)
+                r_in = cell_in.row
+                sh_input.update(f"I{r_in}:P{r_in}", [[m_met, limpar_valor_monetario(m_cre), m_dat, limpar_valor_monetario(m_val),
+                                                      g_met, limpar_valor_monetario(g_cre), g_dat, limpar_valor_monetario(g_val)]], value_input_option='USER_ENTERED')
                 
                 time.sleep(4) 
 
-                # --- BUSCA NO OUTPUT (Cabeçalho na Linha 7) ---
+                # 2. GATILHOS NA OUTPUT
                 data_out = sh_output.get_all_values()
-                df_out = pd.DataFrame(data_out[7:], columns=data_out[6])
-                df_out.iloc[:, 1] = df_out.iloc[:, 1].apply(normalizar_id)
-                res_out = df_out[df_out.iloc[:, 1] == key_normalizada]
+                match_idx = -1
+                for i, r in enumerate(data_out[7:]):
+                    if normalizar_id(r[1]) == key_norm:
+                        match_idx = i + 8
+                        out_row_data = r
+                        break
 
-                # --- BUSCA NA COMUNICAÇÃO (Cabeçalho na Linha 4) ---
-                data_comm = sh_comm.get_all_values()
-                df_comm = pd.DataFrame(data_comm[4:], columns=data_comm[3])
-                df_comm.iloc[:, 0] = df_comm.iloc[:, 0].apply(normalizar_id)
-                res_comm = df_comm[df_comm.iloc[:, 0] == key_normalizada]
-
-                if res_out.empty:
-                    st.error(f"❌ ID '{key_original}' não encontrado na aba OUTPUT.")
+                if match_idx == -1:
+                    st.error("❌ Key não encontrada na aba OUTPUT.")
                 else:
-                    out_row = res_out.iloc[0]
-                    st.success(f"✅ Dados de {cliente_sel} salvos!")
+                    # Copia Y(24) para Z(25) e AK(36) para AL(37)
+                    sh_output.update_cell(match_idx, 26, out_row_data[24]) 
+                    sh_output.update_cell(match_idx, 38, out_row_data[36]) 
                     
-                    # --- DIAGNÓSTICO (Colunas M, P, R, T) ---
-                    st.markdown("### 📊 Verificação de Cheques")
-                    cols = st.columns(4)
+                    time.sleep(2)
+                    final_row = sh_output.row_values(match_idx)
+
+                    st.success(f"✅ Dados de {cliente_sel} atualizados!")
+                    
+                    # --- DIAGNÓSTICO COM EXPLICAÇÃO DE DIFERENÇAS ---
+                    st.markdown("### 📊 Auditoria de Cheques")
+                    cols = st.columns(5)
+                    
+                    # Mapeamento de Cheques
+                    ck2_status = final_row[12]
+                    ck3_status = final_row[15]
+                    
                     checks = [
-                        ("Check 2: Mídia", out_row.iloc[12]), # Col M
-                        ("Check 3: Emissão", out_row.iloc[15]), # Col P
-                        ("Check 4: Meta", out_row.iloc[17]), # Col R
-                        ("Check 4: Google", out_row.iloc[19])  # Col T
+                        ("Check 1 (FB/GL)", f"{final_row[8]} / {final_row[9]}", ""),
+                        ("Check 2 (Mídia)", ck2_status, f"Acordado: {final_row[10]} | Lançado: {final_row[11]}" if "OK" not in str(ck2_status).upper() else ""),
+                        ("Check 3 (Emissão)", ck3_status, f"Acordado: {final_row[13]} | Soma: {final_row[14]}" if "OK" not in str(ck3_status).upper() else ""),
+                        ("Check 4 (Meta)", final_row[17], "Saldo não durará até dia 10" if "OK" not in str(final_row[17]).upper() else ""),
+                        ("Check 4 (Google)", final_row[19], "Saldo não durará até dia 10" if "OK" not in str(final_row[19]).upper() else "")
                     ]
-                    for i, (name, val) in enumerate(checks):
+                    
+                    for i, (name, val, diff) in enumerate(checks):
                         is_ok = "OK" in str(val).upper()
                         cl = "ok-card" if is_ok else "nok-card"
                         with cols[i]:
-                            st.markdown(f"<div class='check-card {cl}'>{name}<br>{val}</div>", unsafe_allow_html=True)
+                            st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}
+                                            <div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
 
                     st.divider()
-                    v1, v2 = st.columns([1, 2])
-                    with v1:
-                        st.metric("Total a Emitir", f"R$ {out_row.iloc[24]}") # Col Y
-                        nome_bol = str(out_row.iloc[27]).strip() # Col AB
-                        if nome_bol: st.info(f"**Título:** {nome_bol}")
+                    l_c, r_c = st.columns(2)
+                    with l_c:
+                        st.metric("A Emitir (Meta)", f"R$ {final_row[24]}")
+                        st.metric("A Emitir (Google)", f"R$ {final_row[36]}")
+                        if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}")
+                        if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}")
                     
-                    with v2:
+                    with r_c:
+                        # Busca Comunicação Segura
+                        data_comm = sh_comm.get_all_values()
+                        comm_match = None
+                        for rc in data_comm[6:]:
+                            if normalizar_id(rc[1]) == key_norm:
+                                comm_match = rc
+                                break
+                        
                         st.markdown("**Ações de Envio:**")
-                        # Se não houver dados de comunicação, avisa em vez de quebrar
-                        if not res_comm.empty:
-                            comm_row = res_comm.iloc[0]
-                            wpp = str(comm_row.iloc[10]).strip() # Col K
-                            mail = str(comm_row.iloc[11]).strip() # Col L
-                            if wpp.startswith("http"): st.link_button("📲 WhatsApp", wpp)
-                            else: st.warning("⚠️ Link de WhatsApp não cadastrado.")
-                            if mail.startswith("http"): st.link_button("📧 E-mail", mail)
-                            else: st.warning("⚠️ Link de E-mail não cadastrado.")
+                        if comm_match:
+                            wpp, mail = str(comm_match[10]).strip(), str(comm_match[11]).strip()
+                            if wpp.startswith("http"): st.link_button("📲 Enviar via WhatsApp", wpp)
+                            else: st.warning("⚠️ WhatsApp não cadastrado.")
+                            if mail.startswith("http"): st.link_button("📧 Enviar via E-mail", mail)
+                            else: st.warning("⚠️ E-mail não cadastrado.")
                         else:
                             st.warning("ℹ️ Este cliente não possui dados na aba de Comunicação.")
-
             except Exception as e:
-                st.error(f"Ocorreu um problema ao processar: {e}")
+                st.error(f"Erro no processamento: {e}")

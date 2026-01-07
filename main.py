@@ -3,9 +3,10 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import time
+import re
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Sistema de Boletos v11", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v14", layout="wide")
 
 st.markdown("""
     <style>
@@ -25,7 +26,18 @@ def init_connection():
     return gspread.authorize(creds)
 
 def normalizar_id(valor):
-    return str(valor).replace(',', '.').strip()
+    if not valor: return ""
+    v = str(valor).replace(',', '.').strip()
+    if v.endswith('.0'): v = v[:-2]
+    return v
+
+def extrair_link_formula(texto):
+    """Extrai a URL de dentro de uma fórmula =HYPERLINK(\"url\"; \"texto\")"""
+    if not texto or not str(texto).startswith('='):
+        return str(texto).strip()
+    # Busca o que está entre as primeiras aspas duplas
+    match = re.search(r'\"(.+?)\"', texto)
+    return match.group(1) if match else texto
 
 def limpar_valor_monetario(texto):
     if not texto: return 0
@@ -67,18 +79,18 @@ else:
     key_norm = normalizar_id(key_orig)
 
     st.divider()
-    st.markdown("#### ✍️ Preenchimento de Dados")
+    st.markdown("#### ✍️ Lançamento de Dados")
     
     c1, c2 = st.columns(2)
     with c1:
         st.subheader("🟦 Meta Ads")
-        m_met = st.selectbox("Método Pagamento", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v1")
+        m_met = st.selectbox("Método Pagamento Meta", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v1")
         m_cre = st.text_input("Crédito Atual Meta", placeholder="Ex: 1.500,00", key="v2")
         m_dat = st.text_input("Data do Saldo Meta", placeholder="DD/MM", key="v3")
         m_val = st.text_input("Gasto Diário Meta", placeholder="Ex: 50,00", key="v4")
     with c2:
         st.subheader("🟩 Google Ads")
-        g_met = st.selectbox("Método Pagamento ", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v5")
+        g_met = st.selectbox("Método Pagamento Google", ["Boleto", "PIX", "Cartão Pós", "Cartão Pré", "Sem Campanha"], key="v5")
         g_cre = st.text_input("Crédito Atual Google", placeholder="Ex: 1.500,00", key="v6")
         g_dat = st.text_input("Data do Saldo Google", placeholder="DD/MM", key="v7")
         g_val = st.text_input("Gasto Diário Google", placeholder="Ex: 50,00", key="v8")
@@ -86,7 +98,7 @@ else:
     if st.button("💾 SALVAR E GERAR DIAGNÓSTICO"):
         with st.spinner("Sincronizando..."):
             try:
-                # 1. SALVAR NA INPUT (Colunas I até P)
+                # 1. SALVAR NA INPUT
                 cell_in = sh_input.find(key_orig, in_column=2)
                 r_in = cell_in.row
                 sh_input.update(f"I{r_in}:P{r_in}", [[m_met, limpar_valor_monetario(m_cre), m_dat, limpar_valor_monetario(m_val),
@@ -106,7 +118,6 @@ else:
                 if match_idx == -1:
                     st.error("❌ Key não encontrada na aba OUTPUT.")
                 else:
-                    # Copia Y(24) para Z(25) e AK(36) para AL(37)
                     sh_output.update_cell(match_idx, 26, out_row_data[24]) 
                     sh_output.update_cell(match_idx, 38, out_row_data[36]) 
                     
@@ -115,13 +126,10 @@ else:
 
                     st.success(f"✅ Dados de {cliente_sel} atualizados!")
                     
-                    # --- DIAGNÓSTICO COM EXPLICAÇÃO DE DIFERENÇAS ---
+                    # --- DIAGNÓSTICO (Auditoria) ---
                     st.markdown("### 📊 Auditoria de Cheques")
                     cols = st.columns(5)
-                    
-                    # Mapeamento de Cheques
-                    ck2_status = final_row[12]
-                    ck3_status = final_row[15]
+                    ck2_status, ck3_status = final_row[12], final_row[15]
                     
                     checks = [
                         ("Check 1 (FB/GL)", f"{final_row[8]} / {final_row[9]}", ""),
@@ -132,7 +140,6 @@ else:
                     ]
                     
                     for i, (name, val, diff) in enumerate(checks):
-                        # MANTIDA A LÓGICA QUE VOCÊ VALIDOU
                         is_ok = "OK" in str(val).upper()
                         cl = "ok-card" if is_ok else "nok-card"
                         with cols[i]:
@@ -148,26 +155,32 @@ else:
                         if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}")
                     
                     with r_c:
-                        # --- BUSCA DE COMUNICAÇÃO AJUSTADA ---
                         st.markdown("**Ações de Envio:**")
-                        data_comm = sh_comm.get_all_values()
+                        # --- LEITURA DE FÓRMULAS ---
+                        # Pedimos ao Google os valores como fórmulas (Linha 7 até o fim)
+                        comm_formulas = sh_comm.get('A7:L', value_render_option='FORMULA')
                         comm_match = None
-                        # Procura o ID na Coluna B (Index 1) a partir da Linha 7 (Index 6)
-                        for rc in data_comm[6:]:
-                            # Comparação robusta de ID para evitar erros de formatação
-                            if str(rc[1]).strip() == key_orig or normalizar_id(rc[1]) == key_norm:
-                                comm_match = rc
+                        
+                        for r_f in comm_formulas:
+                            if len(r_f) > 1 and super_normalizar(r_f[1]) == key_norm:
+                                comm_match = r_f
                                 break
                         
                         if comm_match:
-                            # Coluna K (Index 10) e Coluna L (Index 11)
-                            wpp = str(comm_match[10]).strip()
-                            mail = str(comm_match[11]).strip()
-                            if wpp.startswith("http"): st.link_button("📲 Enviar via WhatsApp", wpp)
-                            else: st.warning("⚠️ WhatsApp não cadastrado.")
-                            if mail.startswith("http"): st.link_button("📧 Enviar via E-mail", mail)
-                            else: st.warning("⚠️ E-mail não cadastrado.")
+                            # Extrai o link de dentro da fórmula se for o caso
+                            wpp_raw = comm_match[10] if len(comm_match) > 10 else ""
+                            mail_raw = comm_match[11] if len(comm_match) > 11 else ""
+                            
+                            wpp_link = extrair_link_formula(wpp_raw)
+                            mail_link = extrair_link_formula(mail_raw)
+                            
+                            if wpp_link.startswith("http"): st.link_button("📲 Enviar via WhatsApp", wpp_link)
+                            else: st.warning("⚠️ Link de WhatsApp não identificado na fórmula.")
+                                
+                            if mail_link.startswith("http"): st.link_button("📧 Enviar via E-mail", mail_link)
+                            else: st.warning("⚠️ Link de E-mail não identificado na fórmula.")
                         else:
-                            st.warning("ℹ️ Este cliente não possui dados na aba de Comunicação.")
+                            st.warning("ℹ️ Dados de contato não localizados para este ID.")
+                            
             except Exception as e:
                 st.error(f"Erro no processamento: {e}")

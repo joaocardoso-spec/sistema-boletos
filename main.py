@@ -3,6 +3,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import time
+import urllib.parse  # Necessário para criar o link do WhatsApp corretamente
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="Sistema de Boletos v11", layout="wide")
@@ -159,29 +160,38 @@ else:
                             row_comm_idx = cell_comm.row
                             
                             # 2. Leitura Segura
-                            comm_vals = sh_comm.row_values(row_comm_idx, value_render_option='FORMATTED_VALUE')
+                            # UNFORMATTED_VALUE ajuda a pegar números crus
+                            comm_vals = sh_comm.row_values(row_comm_idx, value_render_option='UNFORMATTED_VALUE')
                             
                             # Preenche lista se estiver curta
                             while len(comm_vals) < 15:
                                 comm_vals.append("")
 
-                            # 3. Extração dos dados
-                            wpp = str(comm_vals[10]).strip()  # Coluna K
-                            mail = str(comm_vals[11]).strip() # Coluna L
+                            # 3. Extração dos dados BRUTOS (Colunas I e J do seu print)
+                            # Coluna I (Email) é index 8
+                            # Coluna J (Número Ajustado) é index 9
                             
-                            # 4. Botões
-                            if wpp.startswith("http"): 
-                                st.link_button("📲 Enviar via WhatsApp", wpp)
-                            elif wpp == "":
-                                st.warning("⚠️ Link WhatsApp vazio na planilha.")
+                            raw_mail = str(comm_vals[8]).strip()
+                            raw_phone = str(comm_vals[9]).strip() 
+                            nome_cliente = cliente_sel # Usamos o nome que já temos no selectbox
+                            
+                            # 4. Construção do Link WhatsApp via Python
+                            # Isso resolve o problema de vir "Enviar para..." em vez do link
+                            if raw_phone and raw_phone != "-" and raw_phone != "0":
+                                # Mensagem padrão. Você pode alterar esse texto abaixo conforme quiser
+                                msg_texto = f"Olá, aqui é do financeiro. Seguem informações sobre os boletos."
+                                msg_encoded = urllib.parse.quote(msg_texto)
+                                link_wpp = f"https://wa.me/{raw_phone}?text={msg_encoded}"
+                                st.link_button(f"📲 Enviar WhatsApp ({raw_phone})", link_wpp)
                             else:
-                                st.warning(f"⚠️ Formato inválido no WPP: {wpp}")
+                                st.warning("⚠️ Telefone (Col J) não encontrado ou inválido.")
                             
-                            if mail.startswith("http") or "@" in mail: 
-                                link_mail = mail if mail.startswith("http") else f"mailto:{mail}"
-                                st.link_button("📧 Enviar via E-mail", link_mail)
+                            # 5. Construção do Link Email via Python
+                            if raw_mail and "@" in raw_mail:
+                                link_mail = f"mailto:{raw_mail}"
+                                st.link_button(f"📧 Enviar E-mail ({raw_mail})", link_mail)
                             else: 
-                                st.warning("⚠️ E-mail não cadastrado.")
+                                st.warning("⚠️ E-mail (Col I) não cadastrado.")
 
                         except gspread.exceptions.CellNotFound:
                             st.warning("ℹ️ ID do cliente não encontrado na aba COMUNICACAO.")

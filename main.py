@@ -3,7 +3,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 import pandas as pd
 import time
-import urllib.parse  # Necessário para criar o link do WhatsApp corretamente
+import urllib.parse
+from datetime import datetime
 
 # --- CONFIGURAÇÃO ---
 st.set_page_config(page_title="Sistema de Boletos v11", layout="wide")
@@ -116,91 +117,114 @@ else:
 
                     st.success(f"✅ Dados de {cliente_sel} atualizados!")
                     
-                    # --- DIAGNÓSTICO COM EXPLICAÇÃO DE DIFERENÇAS ---
+                    # --- DIAGNÓSTICO ---
                     st.markdown("### 📊 Auditoria de Cheques")
                     cols = st.columns(6)
                     
-                    # Função de validação EXATA
-                    def is_ok(val):
-                        return str(val).strip().upper() == "OK"
+                    def is_ok(val): return str(val).strip().upper() == "OK"
 
-                    # Mapeamento de Cheques
                     checks = [
-                        ("Check 1: FB", final_row[8], ""), # Col I
-                        ("Check 1: GL", final_row[9], ""), # Col J
-                        ("Check 2 (Mídia)", final_row[12], f"Acordado: {final_row[10]} | Lançado: {final_row[11]}" if not is_ok(final_row[12]) else ""), # Col M
-                        ("Check 3 (Emissão)", final_row[15], f"Acordado: {final_row[13]} | Soma: {final_row[14]}" if not is_ok(final_row[15]) else ""), # Col P
-                        ("Check 4 (Meta)", final_row[17], "Saldo não durará até dia 10" if not is_ok(final_row[17]) else ""), # Col R
-                        ("Check 4 (Google)", final_row[19], "Saldo não durará até dia 10" if not is_ok(final_row[19]) else "") # Col T
+                        ("Check 1: FB", final_row[8], ""), 
+                        ("Check 1: GL", final_row[9], ""), 
+                        ("Check 2 (Mídia)", final_row[12], f"Acordado: {final_row[10]} | Lançado: {final_row[11]}" if not is_ok(final_row[12]) else ""), 
+                        ("Check 3 (Emissão)", final_row[15], f"Acordado: {final_row[13]} | Soma: {final_row[14]}" if not is_ok(final_row[15]) else ""), 
+                        ("Check 4 (Meta)", final_row[17], "Saldo não durará até dia 10" if not is_ok(final_row[17]) else ""), 
+                        ("Check 4 (Google)", final_row[19], "Saldo não durará até dia 10" if not is_ok(final_row[19]) else "")
                     ]
                     
                     for i, (name, val, diff) in enumerate(checks):
                         ok_status = is_ok(val)
                         cl = "ok-card" if ok_status else "nok-card"
                         with cols[i]:
-                            st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}
-                                            <div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
+                            st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}<div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
 
                     st.divider()
                     l_c, r_c = st.columns(2)
                     
-                    # Coluna da Esquerda
                     with l_c:
-                        st.metric("A Emitir (Meta Ads)", f"R$ {final_row[24]}") # Col Y
-                        st.metric("A Emitir (Google Ads)", f"R$ {final_row[36]}") # Col AK
-                        if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}") # Col AB
-                        if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}") # Col AN
-                    
-                    # Coluna da Direita (COMUNICAÇÃO)
+                        st.metric("A Emitir (Meta Ads)", f"R$ {final_row[24]}") 
+                        st.metric("A Emitir (Google Ads)", f"R$ {final_row[36]}") 
+                        if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}") 
+                        if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}") 
+
+                    # --- BLOCO DE ENVIO COM FÓRMULAS REPLICADAS ---
                     with r_c:
                         st.markdown("**Ações de Envio:**")
                         try:
-                            # 1. Busca a linha na aba de comunicação
+                            # 1. Busca linha na aba Comunicacao
                             cell_comm = sh_comm.find(key_orig, in_column=2)
                             row_comm_idx = cell_comm.row
                             
-                            # 2. Leitura Segura
-                            # UNFORMATTED_VALUE ajuda a pegar números crus
+                            # 2. Pega dados BRUTOS (sem fórmula)
                             comm_vals = sh_comm.row_values(row_comm_idx, value_render_option='UNFORMATTED_VALUE')
-                            
-                            # Preenche lista se estiver curta
-                            while len(comm_vals) < 15:
-                                comm_vals.append("")
+                            while len(comm_vals) < 15: comm_vals.append("")
 
-                            # 3. Extração dos dados BRUTOS (Colunas I e J do seu print)
-                            # Coluna I (Email) é index 8
-                            # Coluna J (Número Ajustado) é index 9
-                            
-                            raw_mail = str(comm_vals[8]).strip()
-                            raw_phone = str(comm_vals[9]).strip() 
-                            nome_cliente = cliente_sel # Usamos o nome que já temos no selectbox
-                            
-                            # 4. Construção do Link WhatsApp via Python
-                            # Isso resolve o problema de vir "Enviar para..." em vez do link
-                            if raw_phone and raw_phone != "-" and raw_phone != "0":
-                                # Mensagem padrão. Você pode alterar esse texto abaixo conforme quiser
-                                msg_texto = f"Olá, aqui é do financeiro. Seguem informações sobre os boletos."
-                                msg_encoded = urllib.parse.quote(msg_texto)
-                                link_wpp = f"https://wa.me/{raw_phone}?text={msg_encoded}"
-                                st.link_button(f"📲 Enviar WhatsApp ({raw_phone})", link_wpp)
+                            # 3. Mapeamento das Colunas (A=0, B=1, etc.)
+                            val_col_c = str(comm_vals[2]).strip()  # Cliente (Nome)
+                            val_col_g = str(comm_vals[6]).strip()  # Contato (Nome)
+                            val_col_i = str(comm_vals[8]).strip()  # Email Financeiro
+                            val_col_j = str(comm_vals[9]).strip()  # Telefone Ajustado (Melhor que H)
+
+                            # ----------------------------------------
+                            # LÓGICA DO WHATSAPP (Igual Fórmula)
+                            # ----------------------------------------
+                            if val_col_j and val_col_j != "-" and val_col_j != "0":
+                                # Montagem exata do texto da fórmula
+                                texto_wpp = (
+                                    f"Olá, {val_col_g}!\n\n"
+                                    f"Foram enviados no e-mail {val_col_i}, os boletos das plataformas de anúncios.\n\n"
+                                    f"*Observações importantes:*\n"
+                                    f"1. Não conseguimos alterar a data de vencimento dos boletos, por isso pedimos que o pagamento seja feito o mais rápido possível.\n"
+                                    f"2. *De maneira alguma, realize o pagamento de boletos vencidos, sob pena de perder o valor adicionado indefinidamente.*\n\n"
+                                    f"Qualquer dúvida, estou à disposição!"
+                                )
+                                msg_encoded = urllib.parse.quote(texto_wpp)
+                                link_wpp = f"https://wa.me/{val_col_j}?text={msg_encoded}"
+                                
+                                st.link_button(f"📲 Enviar WhatsApp ({val_col_g})", link_wpp)
                             else:
-                                st.warning("⚠️ Telefone (Col J) não encontrado ou inválido.")
-                            
-                            # 5. Construção do Link Email via Python
-                            if raw_mail and "@" in raw_mail:
-                                link_mail = f"mailto:{raw_mail}"
-                                st.link_button(f"📧 Enviar E-mail ({raw_mail})", link_mail)
-                            else: 
-                                st.warning("⚠️ E-mail (Col I) não cadastrado.")
+                                st.warning("⚠️ Telefone não cadastrado (Col J).")
 
-                        except gspread.exceptions.CellNotFound:
-                            st.warning("ℹ️ ID do cliente não encontrado na aba COMUNICACAO.")
-                            
-                        except IndexError:
-                            st.error("❌ Erro de Leitura: A planilha retornou menos colunas do que o necessário.")
-                            
+                            # ----------------------------------------
+                            # LÓGICA DO GMAIL (Igual Fórmula)
+                            # ----------------------------------------
+                            if val_col_i and "@" in val_col_i:
+                                # Variáveis de data para o Assunto
+                                agora = datetime.now()
+                                data_ref = agora.strftime("%m - %Y") # Ex: 01 - 2025
+                                
+                                # Montagem do Assunto e Corpo
+                                assunto = f"Boleto Anúncios - {val_col_c} | Ref. {data_ref}"
+                                corpo_email = (
+                                    f"Olá,\n\n"
+                                    f"Envio anexos os boletos referentes às plataformas de mídia paga.\n\n"
+                                    f"Observações importantes:\n\n"
+                                    f"1. Não é possível editar a data de vencimento do boleto gerado na plataforma e, por isto, pedimos para que o pagamento seja feito o mais rápido possível.\n"
+                                    f"2. De maneira alguma, realize o pagamento de boletos vencidos, sob pena de perder o valor adicionado indefinidamente.\n\n"
+                                    f"Ficamos à disposição para quaisquer esclarecimentos.\n\n"
+                                    f"Obrigada!\n\n"
+                                    f"Atenciosamente,"
+                                )
+                                
+                                # Codificação para URL
+                                params = {
+                                    "view": "cm",
+                                    "fs": "1",
+                                    "to": val_col_i,
+                                    "cc": "financeiro@comodoplanejados.com.br",
+                                    "su": assunto,
+                                    "body": corpo_email
+                                }
+                                # Cria a Query String corretamente
+                                query_string = urllib.parse.urlencode(params, quote_via=urllib.parse.quote) 
+                                link_gmail = f"https://mail.google.com/mail/?{query_string}"
+                                
+                                st.link_button(f"📧 Abrir no Gmail ({val_col_i})", link_gmail)
+                            else:
+                                st.warning("⚠️ E-mail não cadastrado (Col I).")
+
                         except Exception as e:
-                            st.error(f"Erro técnico detalhado: {e}")
+                            st.error(f"Erro na geração dos links: {e}")
 
             except Exception as e:
                 st.error(f"Erro no processamento geral: {e}")

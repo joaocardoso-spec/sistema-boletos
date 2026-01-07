@@ -5,7 +5,7 @@ import pandas as pd
 import time
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Sistema de Boletos v12", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v11", layout="wide")
 
 st.markdown("""
     <style>
@@ -25,8 +25,6 @@ def init_connection():
     return gspread.authorize(creds)
 
 def normalizar_id(valor):
-    """Transforma qualquer ID em string limpa (ex: 0,1 -> 0.1)"""
-    if not valor: return ""
     return str(valor).replace(',', '.').strip()
 
 def limpar_valor_monetario(texto):
@@ -44,24 +42,9 @@ try:
     sh_output = ss.worksheet("OUTPUT - BOLETOS")
     sh_comm = ss.worksheet("COMUNICACAO - CLIENTE")
 
-    # INPUT: Cabeçalhos Linha 4, Dados Linha 5
     vals_in = sh_input.get_all_values()
     df_input = pd.DataFrame(vals_in[4:], columns=vals_in[3])
     df_input = df_input[df_input.iloc[:, 2] != ""].copy()
-
-    # COMUNICAÇÃO: Pré-carregamento robusto (Cabeçalho Linha 6, Dados Linha 7)
-    # Vamos ler a aba inteira para garantir que o ID seja encontrado via Python
-    raw_comm = sh_comm.get_all_values()
-    # Criamos um dicionário {ID_normalizado: [Link_Wpp, Link_Email]}
-    comm_map = {}
-    if len(raw_comm) > 6:
-        for row in raw_comm[6:]: # Linha 7 em diante
-            if len(row) > 11: # Garante que a linha tem as colunas K e L
-                id_limpo = normalizar_id(row[1]) # Coluna B
-                wpp_link = str(row[10]).strip()  # Coluna K
-                mail_link = str(row[11]).strip() # Coluna L
-                comm_map[id_limpo] = [wpp_link, mail_link]
-
 except Exception as e:
     st.error(f"Erro ao conectar com a planilha: {e}")
     st.stop()
@@ -134,24 +117,24 @@ else:
                     
                     # --- DIAGNÓSTICO COM EXPLICAÇÃO DE DIFERENÇAS ---
                     st.markdown("### 📊 Auditoria de Cheques")
-                    cols = st.columns(6)
+                    cols = st.columns(5)
                     
-                    def is_ok(val):
-                        return str(val).strip().upper() == "OK"
-
-                    # Mapeamento de Cheques (Baseado na linha final_row que vem do Sheets)
+                    # Mapeamento de Cheques
+                    ck2_status = final_row[12]
+                    ck3_status = final_row[15]
+                    
                     checks = [
-                        ("Check 1: FB", final_row[8], ""), 
-                        ("Check 1: GL", final_row[9], ""), 
-                        ("Check 2 (Mídia)", final_row[12], f"Acordado: {final_row[10]} | Lançado: {final_row[11]}" if not is_ok(final_row[12]) else ""), 
-                        ("Check 3 (Emissão)", final_row[15], f"Acordado: {final_row[13]} | Soma: {final_row[14]}" if not is_ok(final_row[15]) else ""), 
-                        ("Check 4 (Meta)", final_row[17], "Saldo insuficiente até dia 10" if not is_ok(final_row[17]) else ""), 
-                        ("Check 4 (Google)", final_row[19], "Saldo insuficiente até dia 10" if not is_ok(final_row[19]) else "") 
+                        ("Check 1 (FB/GL)", f"{final_row[8]} / {final_row[9]}", ""),
+                        ("Check 2 (Mídia)", ck2_status, f"Acordado: {final_row[10]} | Lançado: {final_row[11]}" if "OK" not in str(ck2_status).upper() else ""),
+                        ("Check 3 (Emissão)", ck3_status, f"Acordado: {final_row[13]} | Soma: {final_row[14]}" if "OK" not in str(ck3_status).upper() else ""),
+                        ("Check 4 (Meta)", final_row[17], "Saldo não durará até dia 10" if "OK" not in str(final_row[17]).upper() else ""),
+                        ("Check 4 (Google)", final_row[19], "Saldo não durará até dia 10" if "OK" not in str(final_row[19]).upper() else "")
                     ]
                     
                     for i, (name, val, diff) in enumerate(checks):
-                        ok_status = is_ok(val)
-                        cl = "ok-card" if ok_status else "nok-card"
+                        # MANTIDA A LÓGICA QUE VOCÊ VALIDOU
+                        is_ok = "OK" in str(val).upper()
+                        cl = "ok-card" if is_ok else "nok-card"
                         with cols[i]:
                             st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}
                                             <div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
@@ -159,28 +142,32 @@ else:
                     st.divider()
                     l_c, r_c = st.columns(2)
                     with l_c:
-                        st.metric("A Emitir (Meta Ads)", f"R$ {final_row[24]}") 
-                        st.metric("A Emitir (Google Ads)", f"R$ {final_row[36]}") 
-                        if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}") 
-                        if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}") 
+                        st.metric("A Emitir (Meta)", f"R$ {final_row[24]}")
+                        st.metric("A Emitir (Google)", f"R$ {final_row[36]}")
+                        if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}")
+                        if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}")
                     
                     with r_c:
+                        # --- BUSCA DE COMUNICAÇÃO AJUSTADA ---
                         st.markdown("**Ações de Envio:**")
-                        # BUSCA SUPER ROBUSTA NO DICIONÁRIO comm_map
-                        if key_norm in comm_map:
-                            wpp, mail = comm_map[key_norm]
-                            
-                            if wpp.startswith("http"): 
-                                st.link_button("📲 Enviar via WhatsApp", wpp)
-                            else: 
-                                st.warning("⚠️ WhatsApp não cadastrado (Link inválido na planilha).")
-                            
-                            if mail.startswith("http"): 
-                                st.link_button("📧 Enviar via E-mail", mail)
-                            else: 
-                                st.warning("⚠️ E-mail não cadastrado (Link inválido na planilha).")
+                        data_comm = sh_comm.get_all_values()
+                        comm_match = None
+                        # Procura o ID na Coluna B (Index 1) a partir da Linha 7 (Index 6)
+                        for rc in data_comm[6:]:
+                            # Comparação robusta de ID para evitar erros de formatação
+                            if str(rc[1]).strip() == key_orig or normalizar_id(rc[1]) == key_norm:
+                                comm_match = rc
+                                break
+                        
+                        if comm_match:
+                            # Coluna K (Index 10) e Coluna L (Index 11)
+                            wpp = str(comm_match[10]).strip()
+                            mail = str(comm_match[11]).strip()
+                            if wpp.startswith("http"): st.link_button("📲 Enviar via WhatsApp", wpp)
+                            else: st.warning("⚠️ WhatsApp não cadastrado.")
+                            if mail.startswith("http"): st.link_button("📧 Enviar via E-mail", mail)
+                            else: st.warning("⚠️ E-mail não cadastrado.")
                         else:
-                            st.warning(f"ℹ️ ID {key_norm} não localizado na aba de Comunicação.")
-                            
+                            st.warning("ℹ️ Este cliente não possui dados na aba de Comunicação.")
             except Exception as e:
                 st.error(f"Erro no processamento: {e}")

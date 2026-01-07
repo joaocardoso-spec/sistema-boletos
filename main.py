@@ -142,57 +142,55 @@ else:
 
                     st.divider()
                     l_c, r_c = st.columns(2)
+                    
+                    # Coluna da Esquerda
                     with l_c:
                         st.metric("A Emitir (Meta Ads)", f"R$ {final_row[24]}") # Col Y
                         st.metric("A Emitir (Google Ads)", f"R$ {final_row[36]}") # Col AK
                         if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}") # Col AB
                         if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}") # Col AN
                     
-with r_c:
-    st.markdown("**Ações de Envio:**")
-    try:
-        # 1. Busca a linha na aba de comunicação
-        cell_comm = sh_comm.find(key_orig, in_column=2)
-        row_comm_idx = cell_comm.row
-        
-        # 2. Leitura Segura (Evita erro se a linha for menor que o esperado)
-        # value_render_option='FORMATTED_VALUE' força vir o texto visual da célula, não a fórmula
-        comm_vals = sh_comm.row_values(row_comm_idx, value_render_option='FORMATTED_VALUE')
-        
-        # GARANTIA: Se a lista vier curta (o gspread corta células vazias no final), 
-        # nós preenchemos com vazio até ter pelo menos 15 colunas.
-        while len(comm_vals) < 15:
-            comm_vals.append("")
+                    # Coluna da Direita (COMUNICAÇÃO)
+                    with r_c:
+                        st.markdown("**Ações de Envio:**")
+                        try:
+                            # 1. Busca a linha na aba de comunicação
+                            cell_comm = sh_comm.find(key_orig, in_column=2)
+                            row_comm_idx = cell_comm.row
+                            
+                            # 2. Leitura Segura
+                            comm_vals = sh_comm.row_values(row_comm_idx, value_render_option='FORMATTED_VALUE')
+                            
+                            # Preenche lista se estiver curta
+                            while len(comm_vals) < 15:
+                                comm_vals.append("")
 
-        # 3. Extração dos dados
-        wpp = str(comm_vals[10]).strip()  # Coluna K (Índice 10)
-        mail = str(comm_vals[11]).strip() # Coluna L (Índice 11)
-        
-        # Debug visual (só aparece se der erro, ajuda a entender o que veio)
-        # st.write(f"Debug: {comm_vals}") 
-        
-        # 4. Botões
-        if wpp.startswith("http"): 
-            st.link_button("📲 Enviar via WhatsApp", wpp)
-        elif wpp == "":
-            st.warning("⚠️ Link WhatsApp vazio na planilha.")
-        else:
-            # Caso venha texto que não é link
-            st.warning(f"⚠️ Formato inválido no WPP: {wpp}")
-        
-        if mail.startswith("http") or "@" in mail: # Aceita mailto: ou link direto
-            # Se for apenas email texto, adiciona mailto:
-            link_mail = mail if mail.startswith("http") else f"mailto:{mail}"
-            st.link_button("📧 Enviar via E-mail", link_mail)
-        else: 
-            st.warning("⚠️ E-mail não cadastrado.")
+                            # 3. Extração dos dados
+                            wpp = str(comm_vals[10]).strip()  # Coluna K
+                            mail = str(comm_vals[11]).strip() # Coluna L
+                            
+                            # 4. Botões
+                            if wpp.startswith("http"): 
+                                st.link_button("📲 Enviar via WhatsApp", wpp)
+                            elif wpp == "":
+                                st.warning("⚠️ Link WhatsApp vazio na planilha.")
+                            else:
+                                st.warning(f"⚠️ Formato inválido no WPP: {wpp}")
+                            
+                            if mail.startswith("http") or "@" in mail: 
+                                link_mail = mail if mail.startswith("http") else f"mailto:{mail}"
+                                st.link_button("📧 Enviar via E-mail", link_mail)
+                            else: 
+                                st.warning("⚠️ E-mail não cadastrado.")
 
-    except gspread.exceptions.CellNotFound:
-        st.warning("ℹ️ ID do cliente não encontrado na aba COMUNICACAO.")
-        
-    except IndexError:
-        st.error("❌ Erro de Leitura: A planilha retornou menos colunas do que o necessário.")
-        
-    except Exception as e:
-        # Agora você vai ver o erro real se acontecer
-        st.error(f"Erro técnico detalhado: {e}")
+                        except gspread.exceptions.CellNotFound:
+                            st.warning("ℹ️ ID do cliente não encontrado na aba COMUNICACAO.")
+                            
+                        except IndexError:
+                            st.error("❌ Erro de Leitura: A planilha retornou menos colunas do que o necessário.")
+                            
+                        except Exception as e:
+                            st.error(f"Erro técnico detalhado: {e}")
+
+            except Exception as e:
+                st.error(f"Erro no processamento geral: {e}")

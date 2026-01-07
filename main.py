@@ -7,7 +7,7 @@ import urllib.parse
 from datetime import datetime
 
 # --- CONFIGURAÇÃO GLOBAL ---
-st.set_page_config(page_title="Sistema de Boletos v2.1", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v2.3", layout="wide")
 
 st.markdown("""
     <style>
@@ -20,7 +20,10 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- FUNÇÕES ÚTEIS (Compartilhadas) ---
+# --- LISTA DE STATUS PERMITIDOS ---
+ALLOWED_STATUS = ["OK", "DUPLICADO", "ENCERRAR"]
+
+# --- FUNÇÕES ÚTEIS ---
 def init_connection():
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
     creds_dict = st.secrets["gcp_service_account"]
@@ -36,7 +39,6 @@ def limpar_valor_monetario(texto):
     try: return float(limpo)
     except: return 0
 
-# Cache de conexão para não conectar toda hora que troca de tela
 @st.cache_resource
 def get_sheets():
     gc = init_connection()
@@ -48,7 +50,6 @@ def get_sheets():
         "comm": ss.worksheet("COMUNICACAO - CLIENTE")
     }
 
-# Carrega as planilhas uma vez
 try:
     sheets = get_sheets()
 except Exception as e:
@@ -57,12 +58,11 @@ except Exception as e:
 
 
 # ==============================================================================
-# TELA 1: CÓDIGO ORIGINAL (Lógica de Lançamento)
+# TELA 1: LANÇAMENTO (Filtro Direto na INPUT)
 # ==============================================================================
 def pagina_lancamento():
     st.title("🏦 Gestor de Boletos - Lançamento")
 
-    # Carrega dados da INPUT
     vals_in = sheets["input"].get_all_values()
     df_input = pd.DataFrame(vals_in[4:], columns=vals_in[3])
     df_input = df_input[df_input.iloc[:, 2] != ""].copy()
@@ -70,11 +70,11 @@ def pagina_lancamento():
     squad_list = sorted([s for s in df_input.iloc[:, 5].unique() if s and s != "-"] )
     selected_squad = st.sidebar.selectbox("Filtro SQUAD (Lançamento)", squad_list)
 
-    status_ops = ["OK", "NÃO INICIOU", "DUPLICADO", "ENCERRAR"]
-    df_filtered = df_input[(df_input.iloc[:, 5] == selected_squad) & (df_input.iloc[:, 3].isin(status_ops))]
+    # Filtra por Squad (Col 5) e Status (Col 3/D)
+    df_filtered = df_input[(df_input.iloc[:, 5] == selected_squad) & (df_input.iloc[:, 3].isin(ALLOWED_STATUS))]
 
     if df_filtered.empty:
-        st.warning(f"Sem clientes disponíveis para {selected_squad}.")
+        st.warning(f"Sem clientes com status {ALLOWED_STATUS} para {selected_squad}.")
     else:
         cliente_sel = st.selectbox("Selecione o Cliente:", df_filtered.iloc[:, 2].tolist())
         row_sel = df_filtered[df_filtered.iloc[:, 2] == cliente_sel].iloc[0]
@@ -173,15 +173,11 @@ def pagina_lancamento():
                                 val_col_i = str(comm_vals[8]).strip()
                                 val_col_j = str(comm_vals[9]).strip()
 
-                                # WHATSAPP LÓGICA
                                 if val_col_j and val_col_j != "-" and val_col_j != "0":
                                     texto_wpp = (
-                                        f"Olá, {val_col_g}!\n\n"
-                                        f"Foram enviados no e-mail {val_col_i}, os boletos das plataformas de anúncios.\n\n"
-                                        f"*Observações importantes:*\n"
-                                        f"1. Não conseguimos alterar a data de vencimento dos boletos, por isso pedimos que o pagamento seja feito o mais rápido possível.\n"
-                                        f"2. *De maneira alguma, realize o pagamento de boletos vencidos, sob pena de perder o valor adicionado indefinidamente.*\n\n"
-                                        f"Qualquer dúvida, estou à disposição!"
+                                        f"Olá, {val_col_g}!\n\nForam enviados no e-mail {val_col_i}, os boletos das plataformas de anúncios.\n\n"
+                                        f"*Observações importantes:*\n1. Não conseguimos alterar a data de vencimento dos boletos.\n"
+                                        f"2. *De maneira alguma, realize o pagamento de boletos vencidos.*\n\nQualquer dúvida, estou à disposição!"
                                     )
                                     msg_encoded = urllib.parse.quote(texto_wpp)
                                     link_wpp = f"https://wa.me/{val_col_j}?text={msg_encoded}"
@@ -189,25 +185,15 @@ def pagina_lancamento():
                                 else:
                                     st.warning("⚠️ Telefone não cadastrado (Col J).")
 
-                                # GMAIL LÓGICA
                                 if val_col_i and "@" in val_col_i:
                                     agora = datetime.now()
                                     data_ref = agora.strftime("%m - %Y")
                                     assunto = f"Boleto Anúncios - {val_col_c} | Ref. {data_ref}"
                                     corpo_email = (
-                                        f"Olá,\n\n"
-                                        f"Envio anexos os boletos referentes às plataformas de mídia paga.\n\n"
-                                        f"Observações importantes:\n\n"
-                                        f"1. Não é possível editar a data de vencimento do boleto gerado na plataforma e, por isto, pedimos para que o pagamento seja feito o mais rápido possível.\n"
-                                        f"2. De maneira alguma, realize o pagamento de boletos vencidos, sob pena de perder o valor adicionado indefinidamente.\n\n"
-                                        f"Ficamos à disposição para quaisquer esclarecimentos.\n\n"
-                                        f"Obrigada!\n\n"
+                                        f"Olá,\n\nEnvio anexos os boletos referentes às plataformas de mídia paga.\n\n"
                                         f"Atenciosamente,"
                                     )
-                                    params = {
-                                        "view": "cm", "fs": "1", "to": val_col_i, "cc": "financeiro@comodoplanejados.com.br", 
-                                        "su": assunto, "body": corpo_email
-                                    }
+                                    params = {"view": "cm", "fs": "1", "to": val_col_i, "cc": "financeiro@comodoplanejados.com.br", "su": assunto, "body": corpo_email}
                                     query_string = urllib.parse.urlencode(params, quote_via=urllib.parse.quote) 
                                     link_gmail = f"https://mail.google.com/mail/?{query_string}"
                                     st.link_button(f"📧 Abrir no Gmail ({val_col_i})", link_gmail)
@@ -222,45 +208,55 @@ def pagina_lancamento():
 
 
 # ==============================================================================
-# TELA 2: NOVO DASHBOARD (Adicionada agora)
+# TELA 2: DASHBOARD (Filtro Direto na OUTPUT Coluna D)
 # ==============================================================================
 def pagina_dashboard():
     st.title("📊 Dashboard de Status - Squads")
 
     with st.spinner("Carregando dados da aba OUTPUT..."):
         try:
-            raw_data = sheets["output"].get_all_values()
-            header = raw_data[6] # Linha 7
-            data_rows = raw_data[7:] # Linha 8 em diante
+            # 1. Carrega apenas a OUTPUT
+            raw_out = sheets["output"].get_all_values()
+            header = raw_out[6] 
+            data_rows = raw_out[7:] 
             
-            # Cria DataFrame
-            df = pd.DataFrame(data_rows, columns=header)
-            # Limpa linhas vazias baseadas na Key (Coluna B)
-            df = df[df.iloc[:, 1].str.strip() != ""] 
+            df_out = pd.DataFrame(data_rows, columns=header)
+            
+            # 2. FILTRA DIRETAMENTE NA OUTPUT
+            # Coluna D é o Status na Output também, ou seja, Index 3 (4ª coluna)
+            # Também removemos linhas onde a Key (Index 1) é vazia
+            
+            df_final = df_out[
+                (df_out.iloc[:, 1].str.strip() != "") &    # Key existe
+                (df_out.iloc[:, 3].isin(ALLOWED_STATUS))   # Status em Col D é permitido
+            ].copy()
             
         except Exception as e:
-            st.error(f"Erro ao ler OUTPUT: {e}")
+            st.error(f"Erro ao ler/filtrar dados: {e}")
             return
 
     # Filtro de Squad
-    squads = sorted([s for s in df["SQUAD"].unique() if s and s != "-"])
+    squads = sorted([s for s in df_final["SQUAD"].unique() if s and s != "-"])
+    
+    if not squads:
+        st.warning(f"Nenhum cliente encontrado com status {ALLOWED_STATUS} na aba OUTPUT.")
+        return
+
     sel_squad = st.sidebar.selectbox("Filtro SQUAD (Dashboard)", squads)
     
-    # Filtra DF
-    df_squad = df[df["SQUAD"] == sel_squad].copy()
+    # Filtra DF pela Squad selecionada
+    df_squad = df_final[df_final["SQUAD"] == sel_squad].copy()
     
     st.divider()
     st.info("💡 Dica: Edite os status na tabela abaixo e clique em 'Salvar Alterações' no final.")
 
-    # Prepara DF para Edição
-    # AC = Index 28, AO = Index 40
+    # Prepara Tabela
     df_editor = pd.DataFrame()
     df_editor["Key"] = df_squad.iloc[:, 1] # Coluna B
     df_editor["Clientes"] = df_squad.iloc[:, 2] # Coluna C
     df_editor["Status Meta"] = df_squad.iloc[:, 28] # Coluna AC
     df_editor["Status Google"] = df_squad.iloc[:, 40] # Coluna AO
     
-    # Guarda o índice original para saber onde salvar
     df_editor["_original_index"] = df_squad.index
 
     opcoes_status = ["", "EMITIDO", "ENVIADO", "NOK", "FINALIZADO", "ISENTO"]
@@ -286,7 +282,7 @@ def pagina_dashboard():
         try:
             total = len(edited_df)
             for i, row in edited_df.iterrows():
-                # Linha real na planilha: Indice + 8 (pois dados começam na linha 8)
+                # Linha real: Indice + 8
                 real_row = int(row["_original_index"]) + 8
                 
                 updates.append({'range': f"AC{real_row}", 'values': [[row["Status Meta"]]]})

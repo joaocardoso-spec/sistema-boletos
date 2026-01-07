@@ -146,4 +146,232 @@ def pagina_lancamento():
                     checks = [
                         ("Check 1: FB", safe_get(final_row, 8), ""), 
                         ("Check 1: GL", safe_get(final_row, 9), ""), 
-                        ("Check 2 (Mídia)", safe_get(final_row, 12),
+                        ("Check 2 (Mídia)", safe_get(final_row, 12), ""), 
+                        ("Check 3 (Emissão)", safe_get(final_row, 15), ""), 
+                        ("Check 4 (Meta)", safe_get(final_row, 17), "Saldo baixo" if not is_ok(safe_get(final_row, 17)) else ""), 
+                        ("Check 4 (Google)", safe_get(final_row, 19), "Saldo baixo" if not is_ok(safe_get(final_row, 19)) else "")
+                    ]
+                    
+                    for i, (name, val, diff) in enumerate(checks):
+                        ok_status = is_ok(val)
+                        cl = "ok-card" if ok_status else "nok-card"
+                        with cols[i]:
+                            st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}<div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
+
+                    st.divider()
+                    l_c, r_c = st.columns(2)
+                    
+                    with l_c:
+                        st.metric("A Emitir (Meta Ads)", f"R$ {safe_get(final_row, 24)}") 
+                        st.metric("A Emitir (Google Ads)", f"R$ {safe_get(final_row, 36)}") 
+
+                    # --- BLOCO DE ENVIO (LÓGICA PYTHON) ---
+                    with r_c:
+                        st.markdown("**Ações de Envio:**")
+                        try:
+                            # 1. Busca linha na aba Comunicacao
+                            cell_comm = sheets["comm"].find(key_orig, in_column=2)
+                            row_comm_idx = cell_comm.row
+                            
+                            # 2. Pega dados BRUTOS (sem fórmula)
+                            comm_vals = sheets["comm"].row_values(row_comm_idx, value_render_option='UNFORMATTED_VALUE')
+                            while len(comm_vals) < 15: comm_vals.append("")
+
+                            val_col_c = str(comm_vals[2]).strip()  # Cliente
+                            val_col_g = str(comm_vals[6]).strip()  # Contato
+                            val_col_i = str(comm_vals[8]).strip()  # Email
+                            val_col_j = str(comm_vals[9]).strip()  # Telefone Ajustado
+
+                            # WhatsApp
+                            if val_col_j and val_col_j not in ["-", "0", ""]:
+                                texto_wpp = (
+                                    f"Olá, {val_col_g}!\n\nForam enviados no e-mail {val_col_i}, os boletos das plataformas de anúncios.\n\n"
+                                    f"*Observações importantes:*\n1. Não conseguimos alterar a data de vencimento dos boletos.\n"
+                                    f"2. *De maneira alguma, realize o pagamento de boletos vencidos.*\n\nQualquer dúvida, estou à disposição!"
+                                )
+                                msg_encoded = urllib.parse.quote(texto_wpp)
+                                link_wpp = f"https://wa.me/{val_col_j}?text={msg_encoded}"
+                                st.link_button(f"📲 Enviar WhatsApp ({val_col_g})", link_wpp)
+                            else:
+                                st.warning("⚠️ Telefone não cadastrado (Col J).")
+
+                            # Gmail
+                            if val_col_i and "@" in val_col_i:
+                                agora = datetime.now()
+                                data_ref = agora.strftime("%m - %Y")
+                                assunto = f"Boleto Anúncios - {val_col_c} | Ref. {data_ref}"
+                                corpo_email = (
+                                    f"Olá,\n\nEnvio anexos os boletos referentes às plataformas de mídia paga.\n\n"
+                                    f"Observações importantes:\n1. Não é possível editar a data de vencimento.\n"
+                                    f"2. De maneira alguma, realize o pagamento de boletos vencidos.\n\n"
+                                    f"Atenciosamente,"
+                                )
+                                params = {"view": "cm", "fs": "1", "to": val_col_i, "cc": "financeiro@comodoplanejados.com.br", "su": assunto, "body": corpo_email}
+                                query_string = urllib.parse.urlencode(params, quote_via=urllib.parse.quote) 
+                                link_gmail = f"https://mail.google.com/mail/?{query_string}"
+                                st.link_button(f"📧 Abrir no Gmail ({val_col_i})", link_gmail)
+                            else:
+                                st.warning("⚠️ E-mail não cadastrado (Col I).")
+
+                        except Exception as e:
+                            st.error(f"Erro na geração dos links: {e}")
+
+            except Exception as e:
+                st.error(f"Erro no processamento geral: {e}")
+
+# ==============================================================================
+# PÁGINA 2: DASHBOARD DE STATUS (Nova Funcionalidade)
+# ==============================================================================
+def pagina_dashboard():
+    st.title("📊 Dashboard de Status - Squads")
+
+    # 1. Carregar Dados da OUTPUT
+    with st.spinner("Carregando dados da aba OUTPUT..."):
+        try:
+            # Pega todos os valores
+            raw_data = sheets["output"].get_all_values()
+            
+            # Cabeçalho na linha 7 (index 6)
+            header = raw_data[6]
+            
+            # Dados a partir da linha 8 (index 7)
+            data_rows = raw_data[7:]
+            
+            # Cria DataFrame
+            df = pd.DataFrame(data_rows, columns=header)
+            
+            # Filtra linhas vazias (Key ou Cliente vazio)
+            df = df[df["Key"].str.strip() != ""]
+            
+        except Exception as e:
+            st.error(f"Erro ao ler OUTPUT: {e}")
+            return
+
+    # 2. Filtros
+    squads = sorted([s for s in df["SQUAD"].unique() if s and s != "-"])
+    
+    c_filt, c_dummy = st.columns([1, 2])
+    with c_filt:
+        sel_squad = st.selectbox("Selecione a SQUAD:", squads)
+    
+    # Filtra DF pela Squad
+    df_squad = df[df["SQUAD"] == sel_squad].copy()
+    
+    # 3. Preparação para Edição
+    # Precisamos identificar as colunas AC e AO. 
+    # Como carregamos pelo cabeçalho, vamos buscar pelo nome da coluna ou pelo índice se o nome for vazio/repetido.
+    # Assumindo que o cabeçalho está correto, mas vamos garantir pegando pelo índice para segurança.
+    # AC é a 29ª coluna (Index 28 no Python)
+    # AO é a 41ª coluna (Index 40 no Python)
+    
+    # Mapeamento seguro de nomes de colunas para o Data Editor
+    # Vamos criar um DF reduzido apenas com o que importa para edição
+    
+    # Pega os nomes das colunas de status baseados na posição
+    col_name_meta = header[28] if len(header) > 28 else "Status Meta (AC)"
+    col_name_google = header[40] if len(header) > 40 else "Status Google (AO)"
+    
+    # Cria um DF limpo para exibição
+    df_editor = df_squad[["Key", "Clientes", "SQUAD"]].copy()
+    
+    # Adiciona as colunas de status buscando pelo índice original do DF completo
+    # O df_squad tem as mesmas colunas do df original (header)
+    df_editor["Status Meta"] = df_squad.iloc[:, 28] 
+    df_editor["Status Google"] = df_squad.iloc[:, 40]
+    
+    # Adiciona índice original para podermos salvar depois (Index + 8 = Linha na planilha)
+    df_editor["_original_index"] = df_squad.index
+    
+    st.divider()
+    st.info("💡 Dica: Edite os status na tabela abaixo e clique em 'Salvar Alterações' no final.")
+
+    # 4. Tabela Editável
+    opcoes_status = ["", "EMITIDO", "ENVIADO", "NOK", "FINALIZADO", "ISENTO"]
+    
+    edited_df = st.data_editor(
+        df_editor,
+        column_config={
+            "_original_index": None, # Esconde essa coluna
+            "Key": st.column_config.TextColumn("ID Cliente", disabled=True),
+            "Clientes": st.column_config.TextColumn("Nome Cliente", disabled=True, width="medium"),
+            "SQUAD": st.column_config.TextColumn("Squad", disabled=True),
+            "Status Meta": st.column_config.SelectboxColumn(
+                "Status Meta (AC)",
+                help="Selecione o status do boleto Meta",
+                width="medium",
+                options=opcoes_status,
+                required=False
+            ),
+            "Status Google": st.column_config.SelectboxColumn(
+                "Status Google (AO)",
+                help="Selecione o status do boleto Google",
+                width="medium",
+                options=opcoes_status,
+                required=False
+            )
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="editor_status"
+    )
+
+    # 5. Botão de Salvar
+    if st.button("💾 SALVAR ALTERAÇÕES EM LOTE", type="primary"):
+        # Compara o editado com o original para saber o que mudou (simples: iteramos e salvamos tudo da squad filtrada)
+        # Para otimizar, poderíamos comparar, mas salvar a squad atual é seguro e rápido o suficiente.
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        updates = []
+        
+        try:
+            total = len(edited_df)
+            for i, row in edited_df.iterrows():
+                # Calcula a linha real na planilha
+                # O índice do DataFrame 'raw_data' começava em 0 (linha 1 da planilha).
+                # Nossos dados começaram na linha 8 (index 7 do raw_data).
+                # O '_original_index' guardou o índice relativo ao slice 'data_rows'.
+                # Logo: Linha Real = _original_index + 8
+                
+                real_row = int(row["_original_index"]) + 8
+                
+                # Valores a salvar
+                val_meta = row["Status Meta"]
+                val_google = row["Status Google"]
+                
+                # Adiciona à lista de batch update
+                # Formato gspread batch: {'range': 'AC10', 'values': [['EMITIDO']]}
+                
+                updates.append({
+                    'range': f"AC{real_row}",
+                    'values': [[val_meta]]
+                })
+                updates.append({
+                    'range': f"AO{real_row}",
+                    'values': [[val_google]]
+                })
+
+            status_text.text("Enviando dados para o Google Sheets...")
+            
+            # Batch update é muito mais rápido que update_cell um por um
+            sheets["output"].batch_update(updates)
+            
+            progress_bar.progress(100)
+            st.success(f"✅ Sucesso! {total} linhas processadas e status atualizados.")
+            time.sleep(2)
+            st.rerun()
+            
+        except Exception as e:
+            st.error(f"Erro ao salvar: {e}")
+
+# ==============================================================================
+# MENU LATERAL PRINCIPAL
+# ==============================================================================
+st.sidebar.title("Menu Principal")
+pagina = st.sidebar.radio("Navegar para:", ["📝 Lançamento", "📊 Dashboard de Status"])
+
+if pagina == "📝 Lançamento":
+    pagina_lancamento()
+else:
+    pagina_dashboard()

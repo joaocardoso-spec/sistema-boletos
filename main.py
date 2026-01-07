@@ -25,9 +25,9 @@ try:
     
     # --- COLOQUE O ID DA SUA PLANILHA AQUI ---
     # O ID é a parte entre /d/ e /edit na URL da sua planilha
-    SPREADSHEET_ID = "COLE_AQUI_O_ID_DA_SUA_PLANILHA" 
+    SPREADSHEET_ID = "1zOof6YDL4U8hYMiFi5zt4V_alYK6EcRvV3QKERvNlhA" 
     
-    ss = gc.open_by_key(1zOof6YDL4U8hYMiFi5zt4V_alYK6EcRvV3QKERvNlhA)
+    ss = gc.open_by_key(SPREADSHEET_ID)
     
     # Acessando as abas
     sh_input = ss.worksheet("INPUT - BOLETOS")

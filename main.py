@@ -6,7 +6,7 @@ import time
 import re
 
 # --- CONFIGURAÇÃO ---
-st.set_page_config(page_title="Sistema de Boletos v14", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v16", layout="wide")
 
 st.markdown("""
     <style>
@@ -26,18 +26,21 @@ def init_connection():
     return gspread.authorize(creds)
 
 def normalizar_id(valor):
+    """Padronização de ID para garantir o match entre abas"""
     if not valor: return ""
     v = str(valor).replace(',', '.').strip()
     if v.endswith('.0'): v = v[:-2]
     return v
 
 def extrair_link_formula(texto):
-    """Extrai a URL de dentro de uma fórmula =HYPERLINK(\"url\"; \"texto\")"""
-    if not texto or not str(texto).startswith('='):
-        return str(texto).strip()
-    # Busca o que está entre as primeiras aspas duplas
-    match = re.search(r'\"(.+?)\"', texto)
-    return match.group(1) if match else texto
+    """Extrai a URL de dentro de uma fórmula HYPERLINK"""
+    texto_str = str(texto)
+    if not texto_str.startswith('='):
+        return texto_str.strip()
+    match = re.search(r'[\"\'](.+?)[\"\']', texto_str)
+    if match:
+        return match.group(1)
+    return texto_str
 
 def limpar_valor_monetario(texto):
     if not texto: return 0
@@ -109,8 +112,9 @@ else:
                 # 2. GATILHOS NA OUTPUT
                 data_out = sh_output.get_all_values()
                 match_idx = -1
+                out_row_data = None
                 for i, r in enumerate(data_out[7:]):
-                    if normalizar_id(r[1]) == key_norm:
+                    if normalizar_id(r[1]) == key_norm: # CORRIGIDO: Agora usa normalizar_id
                         match_idx = i + 8
                         out_row_data = r
                         break
@@ -126,7 +130,7 @@ else:
 
                     st.success(f"✅ Dados de {cliente_sel} atualizados!")
                     
-                    # --- DIAGNÓSTICO (Auditoria) ---
+                    # --- DIAGNÓSTICO ---
                     st.markdown("### 📊 Auditoria de Cheques")
                     cols = st.columns(5)
                     ck2_status, ck3_status = final_row[12], final_row[15]
@@ -149,25 +153,23 @@ else:
                     st.divider()
                     l_c, r_c = st.columns(2)
                     with l_c:
-                        st.metric("A Emitir (Meta)", f"R$ {final_row[24]}")
-                        st.metric("A Emitir (Google)", f"R$ {final_row[36]}")
+                        st.metric("A Emitir (Meta Ads)", f"R$ {final_row[24]}")
+                        st.metric("A Emitir (Google Ads)", f"R$ {final_row[36]}")
                         if len(final_row) > 27 and final_row[27]: st.info(f"**Boleto Meta:** {final_row[27]}")
                         if len(final_row) > 39 and final_row[39]: st.info(f"**Boleto Google:** {final_row[39]}")
                     
                     with r_c:
                         st.markdown("**Ações de Envio:**")
                         # --- LEITURA DE FÓRMULAS ---
-                        # Pedimos ao Google os valores como fórmulas (Linha 7 até o fim)
-                        comm_formulas = sh_comm.get('A7:L', value_render_option='FORMULA')
+                        comm_formulas = sh_comm.get_values('A:L', value_render_option='FORMULA')
                         comm_match = None
                         
                         for r_f in comm_formulas:
-                            if len(r_f) > 1 and super_normalizar(r_f[1]) == key_norm:
+                            if len(r_f) > 1 and normalizar_id(r_f[1]) == key_norm: # CORRIGIDO: Agora usa normalizar_id
                                 comm_match = r_f
                                 break
                         
                         if comm_match:
-                            # Extrai o link de dentro da fórmula se for o caso
                             wpp_raw = comm_match[10] if len(comm_match) > 10 else ""
                             mail_raw = comm_match[11] if len(comm_match) > 11 else ""
                             
@@ -175,12 +177,12 @@ else:
                             mail_link = extrair_link_formula(mail_raw)
                             
                             if wpp_link.startswith("http"): st.link_button("📲 Enviar via WhatsApp", wpp_link)
-                            else: st.warning("⚠️ Link de WhatsApp não identificado na fórmula.")
+                            else: st.warning("⚠️ WhatsApp não extraído.")
                                 
                             if mail_link.startswith("http"): st.link_button("📧 Enviar via E-mail", mail_link)
-                            else: st.warning("⚠️ Link de E-mail não identificado na fórmula.")
+                            else: st.warning("📧 E-mail não extraído.")
                         else:
-                            st.warning("ℹ️ Dados de contato não localizados para este ID.")
+                            st.warning("ℹ️ Dados de contato não localizados.")
                             
             except Exception as e:
                 st.error(f"Erro no processamento: {e}")

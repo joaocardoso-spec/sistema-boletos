@@ -197,17 +197,11 @@ def pagina_lancamento():
                             ("Check 4 (Google)", safe_get(final_row, 19), "Saldo não durará até dia 10" if not is_ok(safe_get(final_row, 19)) else "")
                         ]
                         
-                        # --- CÓDIGO NOVO (CORRIGIDO) ---
-                                for i, (name, val, diff) in enumerate(checks):
-    # Lógica Ajustada: Se for Check 1 (FB ou GL), vazio também é verde
-                                    if "Check 1" in name:
-                                        ok_status = (not val or str(val).strip() == "" or is_ok(val))
-                                    else:
-                                        ok_status = is_ok(val)
-        
-                                    cl = "ok-card" if ok_status else "nok-card"
-                                    with cols[i]:
-                                        st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}<div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
+                        for i, (name, val, diff) in enumerate(checks):
+                            ok_status = is_ok(val)
+                            cl = "ok-card" if ok_status else "nok-card"
+                            with cols[i]:
+                                st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}<div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
 
                         st.divider()
                         l_c, r_c = st.columns(2)
@@ -534,3 +528,4 @@ pagina = st.sidebar.radio("Ir para:", ["📝 Lançamento Individual", "🚀 Atua
 if pagina == "📝 Lançamento Individual": pagina_lancamento()
 elif pagina == "🚀 Atualização em Massa": pagina_atualizacao_massa()
 else: pagina_dashboard()
+

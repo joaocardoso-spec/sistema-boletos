@@ -7,7 +7,7 @@ import urllib.parse
 from datetime import datetime
 
 # --- CONFIGURAÇÃO GLOBAL ---
-st.set_page_config(page_title="Sistema de Boletos v3.2", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v3.3", layout="wide")
 
 # CSS OTIMIZADO
 st.markdown("""
@@ -38,7 +38,7 @@ st.markdown("""
         margin-bottom: 15px;
     }
     .mass-check-box {
-        padding: 8px;
+        padding: 6px;
         border-radius: 4px;
         text-align: center;
         font-size: 0.75em;
@@ -47,7 +47,8 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         justify-content: center;
-        min-height: 50px;
+        min-height: 60px; /* Aumentei um pouco para caber a explicação */
+        word-wrap: break-word;
     }
     .check-ok { background-color: #1a7f37; border: 1px solid #2ea043; }
     .check-nok { background-color: #a40e26; border: 1px solid #ff4b4b; }
@@ -246,9 +247,6 @@ def pagina_lancamento():
                                     corpo_email = (
                                         f"Olá,\n\n"
                                         f"Envio anexos os boletos referentes às plataformas de mídia paga.\n\n"
-                                        f"Observações importantes:\n"
-                                        f"1. Não é possível editar a data de vencimento do boleto gerado na plataforma.\n"
-                                        f"2. De maneira alguma, realize o pagamento de boletos vencidos.\n\n"
                                         f"Atenciosamente,"
                                     )
                                     params = {"view": "cm", "fs": "1", "to": val_col_i, "cc": "financeiro@comodoplanejados.com.br", "su": assunto, "body": corpo_email}
@@ -266,7 +264,7 @@ def pagina_lancamento():
 
 
 # ==============================================================================
-# TELA 2: ATUALIZAÇÃO EM MASSA (Corrigida: Data e Botões)
+# TELA 2: ATUALIZAÇÃO EM MASSA (Ajustes Visuais e Lógicos)
 # ==============================================================================
 def pagina_atualizacao_massa():
     st.title("🚀 Atualização em Massa - Boletos")
@@ -291,7 +289,8 @@ def pagina_atualizacao_massa():
     inputs = {}
     with st.form("form_massa"):
         for i, row in df_filtered.iterrows():
-            with st.expander(f"👤 {row['Clientes']}", expanded=True):
+            # AJUSTE 1: Expanded=False por padrão
+            with st.expander(f"👤 {row['Clientes']}", expanded=False):
                 c1, c2 = st.columns(2)
                 row_key = str(i)
                 with c1:
@@ -334,7 +333,7 @@ def pagina_atualizacao_massa():
             if not updates:
                 st.warning("Nada preenchido."); return
 
-            # 2. Envia (CORREÇÃO DE DATA AQUI: value_input_option='USER_ENTERED')
+            # 2. Envia
             sheets["input"].batch_update(updates, value_input_option='USER_ENTERED')
             
             status.write("Enviado! Calculando (4s)...")
@@ -359,17 +358,43 @@ def pagina_atualizacao_massa():
                 comm_row = next((r for r in all_comm if len(r) > 2 and normalizar_id(r[1]) == c_key), None)
                 
                 if out_row:
-                    # Checks
+                    # AJUSTE 3: Preparação dos Checks com Explicação Detalhada
+                    # Recuperando valores para explicar o NOK
+                    val_c2 = safe_get(out_row, 12)
+                    diff_c2 = f"Acordado: {safe_get(out_row, 10)}<br>Lançado: {safe_get(out_row, 11)}" if not is_ok(val_c2) else ""
+
+                    val_c3 = safe_get(out_row, 15)
+                    diff_c3 = f"Acordado: {safe_get(out_row, 13)}<br>Soma: {safe_get(out_row, 14)}" if not is_ok(val_c3) else ""
+
+                    val_c4m = safe_get(out_row, 17)
+                    diff_c4m = "Saldo baixo" if not is_ok(val_c4m) else ""
+                    
+                    val_c4g = safe_get(out_row, 19)
+                    diff_c4g = "Saldo baixo" if not is_ok(val_c4g) else ""
+                    
+                    # Lista de Tuplas: (Nome, Valor, Explicação)
                     checks_data = [
-                        ("FB", safe_get(out_row, 8)), ("GL", safe_get(out_row, 9)),
-                        ("Mídia", safe_get(out_row, 12)), ("Emissão", safe_get(out_row, 15)),
-                        ("Meta", safe_get(out_row, 17)), ("Google", safe_get(out_row, 19))
+                        ("FB", safe_get(out_row, 8), ""), 
+                        ("GL", safe_get(out_row, 9), ""),
+                        ("Mídia", val_c2, diff_c2), 
+                        ("Emissão", val_c3, diff_c3),
+                        ("Meta", val_c4m, diff_c4m), 
+                        ("Google", val_c4g, diff_c4g)
                     ]
                     
                     checks_html_str = ""
-                    for name, val in checks_data:
-                        cls = "check-ok" if is_ok(val) else "check-nok"
-                        checks_html_str += f"<div class='mass-check-box {cls}'>{name}<br>{val}</div>"
+                    for name, val, diff in checks_data:
+                        # AJUSTE 2: Lógica Visual. Para FB/GL, Vazio = OK.
+                        if name in ["FB", "GL"]:
+                            # Se for nulo, string vazia ou OK, fica verde.
+                            cls = "check-ok" if (not val or str(val).strip() == "" or is_ok(val)) else "check-nok"
+                        else:
+                            cls = "check-ok" if is_ok(val) else "check-nok"
+                        
+                        # Adiciona a explicação se houver (letra pequena)
+                        diff_html = f"<div style='font-size:0.65em; margin-top:3px; line-height:1.1; opacity:0.9;'>{diff}</div>" if diff else ""
+                        
+                        checks_html_str += f"<div class='mass-check-box {cls}'>{name}<br>{val}{diff_html}</div>"
 
                     # Valores
                     val_meta = str(safe_get(out_row, 24)).replace("R$", "").strip()
@@ -377,7 +402,7 @@ def pagina_atualizacao_massa():
                     txt_meta = safe_get(out_row, 27)
                     txt_google = safe_get(out_row, 39)
 
-                    # Botões (Lógica REPLICADA DA INDIVIDUAL)
+                    # Botões
                     btns_html = ""
                     if comm_row:
                          val_col_c = str(comm_row[2]).strip()
@@ -385,9 +410,7 @@ def pagina_atualizacao_massa():
                          val_col_i = str(comm_row[8]).strip()
                          val_col_j = str(comm_row[9]).strip()
                          
-                         # --- Lógica WPP ---
                          if val_col_j and val_col_j not in ["-", "0", ""]:
-                             # Texto idêntico à aba individual
                              texto_wpp = (
                                 f"Olá, {val_col_g}!\n\n"
                                 f"Foram enviados no e-mail {val_col_i}, os boletos das plataformas de anúncios.\n\n"
@@ -399,7 +422,6 @@ def pagina_atualizacao_massa():
                              link = f"https://wa.me/{val_col_j}?text={urllib.parse.quote(texto_wpp)}"
                              btns_html += f"<a href='{link}' target='_blank' style='text-decoration:none; flex:1;'><button style='background-color:#238636;color:white;border:none;padding:12px;border-radius:6px;width:100%;cursor:pointer;font-weight:bold;margin-right:5px;'>WhatsApp</button></a>"
                          
-                         # --- Lógica Gmail ---
                          if val_col_i and "@" in val_col_i:
                              agora = datetime.now()
                              data_ref = agora.strftime("%m - %Y")
@@ -445,7 +467,7 @@ def pagina_atualizacao_massa():
                     """
                     st.markdown(html_card, unsafe_allow_html=True)
                     
-                    # Trigger visual Output
+                    # Trigger Output
                     match_idx_out = -1
                     for idx, r in enumerate(all_out[7:]):
                          if len(r) > 1 and normalizar_id(r[1]) == c_key:

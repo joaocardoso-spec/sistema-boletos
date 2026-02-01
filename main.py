@@ -7,7 +7,7 @@ import urllib.parse
 from datetime import datetime
 
 # --- CONFIGURAÇÃO GLOBAL ---
-st.set_page_config(page_title="Sistema de Boletos v3.4", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v3.5", layout="wide")
 
 # CSS OTIMIZADO
 st.markdown("""
@@ -114,7 +114,7 @@ except Exception as e:
 
 
 # ==============================================================================
-# TELA 1: LANÇAMENTO INDIVIDUAL (Texto Gmail Corrigido)
+# TELA 1: LANÇAMENTO INDIVIDUAL (Lógica Check 1 Corrigida)
 # ==============================================================================
 def pagina_lancamento():
     st.title("🏦 Gestor de Boletos - Lançamento Individual")
@@ -197,11 +197,18 @@ def pagina_lancamento():
                             ("Check 4 (Google)", safe_get(final_row, 19), "Saldo não durará até dia 10" if not is_ok(safe_get(final_row, 19)) else "")
                         ]
                         
+                        # --- AQUI ESTÁ A CORREÇÃO QUE VOCÊ PEDIU ---
                         for i, (name, val, diff) in enumerate(checks):
-                            ok_status = is_ok(val)
+                            if "Check 1" in name:
+                                # Se for check 1, aceita Vazio como OK
+                                ok_status = (not val or str(val).strip() == "" or is_ok(val))
+                            else:
+                                ok_status = is_ok(val)
+                                
                             cl = "ok-card" if ok_status else "nok-card"
                             with cols[i]:
                                 st.markdown(f"""<div class='check-card {cl}'>{name}<br>{val}<div class='val-diff'>{diff}</div></div>""", unsafe_allow_html=True)
+                        # ---------------------------------------------
 
                         st.divider()
                         l_c, r_c = st.columns(2)
@@ -244,7 +251,6 @@ def pagina_lancamento():
                                     agora = datetime.now()
                                     data_ref = agora.strftime("%m - %Y")
                                     assunto = f"Boleto Anúncios - {val_col_c} | Ref. {data_ref}"
-                                    # CORREÇÃO: TEXTO COMPLETO DO GMAIL
                                     corpo_email = (
                                         f"Olá,\n\n"
                                         f"Envio anexos os boletos referentes às plataformas de mídia paga.\n\n"
@@ -349,7 +355,6 @@ def pagina_atualizacao_massa():
             all_out = sheets["output"].get_all_values()
             all_comm = sheets["comm"].get_all_values()
             
-            # CORREÇÃO: expanded=True para que o status fique aberto no final
             status.update(label="Concluído!", state="complete", expanded=True)
 
             st.divider()
@@ -528,4 +533,3 @@ pagina = st.sidebar.radio("Ir para:", ["📝 Lançamento Individual", "🚀 Atua
 if pagina == "📝 Lançamento Individual": pagina_lancamento()
 elif pagina == "🚀 Atualização em Massa": pagina_atualizacao_massa()
 else: pagina_dashboard()
-

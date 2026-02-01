@@ -7,9 +7,9 @@ import urllib.parse
 from datetime import datetime
 
 # --- CONFIGURAÇÃO GLOBAL ---
-st.set_page_config(page_title="Sistema de Boletos v3.1", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v3.2", layout="wide")
 
-# CSS OTIMIZADO PARA OS CARDS E LAYOUT
+# CSS OTIMIZADO
 st.markdown("""
     <style>
     .main { background-color: #0b0e14; color: #ffffff; }
@@ -113,7 +113,7 @@ except Exception as e:
 
 
 # ==============================================================================
-# TELA 1: LANÇAMENTO INDIVIDUAL (Restaurada v2.3)
+# TELA 1: LANÇAMENTO INDIVIDUAL (Intacta)
 # ==============================================================================
 def pagina_lancamento():
     st.title("🏦 Gestor de Boletos - Lançamento Individual")
@@ -246,6 +246,9 @@ def pagina_lancamento():
                                     corpo_email = (
                                         f"Olá,\n\n"
                                         f"Envio anexos os boletos referentes às plataformas de mídia paga.\n\n"
+                                        f"Observações importantes:\n"
+                                        f"1. Não é possível editar a data de vencimento do boleto gerado na plataforma.\n"
+                                        f"2. De maneira alguma, realize o pagamento de boletos vencidos.\n\n"
                                         f"Atenciosamente,"
                                     )
                                     params = {"view": "cm", "fs": "1", "to": val_col_i, "cc": "financeiro@comodoplanejados.com.br", "su": assunto, "body": corpo_email}
@@ -263,7 +266,7 @@ def pagina_lancamento():
 
 
 # ==============================================================================
-# TELA 2: ATUALIZAÇÃO EM MASSA (Corrigida)
+# TELA 2: ATUALIZAÇÃO EM MASSA (Corrigida: Data e Botões)
 # ==============================================================================
 def pagina_atualizacao_massa():
     st.title("🚀 Atualização em Massa - Boletos")
@@ -272,7 +275,6 @@ def pagina_atualizacao_massa():
     df_input = pd.DataFrame(vals_in[4:], columns=vals_in[3])
     df_input = df_input[df_input.iloc[:, 2] != ""].copy()
     
-    # Indice para salvar
     df_input["_row_idx"] = df_input.index + 5 
 
     squad_list = sorted([s for s in df_input.iloc[:, 5].unique() if s and s != "-"] )
@@ -310,7 +312,7 @@ def pagina_atualizacao_massa():
     if btn_enviar:
         with st.status("Processando...", expanded=True) as status:
             updates = []
-            clients_meta = [] # Para guardar infos e mostrar cards
+            clients_meta = [] 
             
             # 1. Coleta Inputs
             for i, row in df_filtered.iterrows():
@@ -332,8 +334,9 @@ def pagina_atualizacao_massa():
             if not updates:
                 st.warning("Nada preenchido."); return
 
-            # 2. Envia
-            sheets["input"].batch_update(updates)
+            # 2. Envia (CORREÇÃO DE DATA AQUI: value_input_option='USER_ENTERED')
+            sheets["input"].batch_update(updates, value_input_option='USER_ENTERED')
+            
             status.write("Enviado! Calculando (4s)...")
             time.sleep(4)
             
@@ -349,13 +352,14 @@ def pagina_atualizacao_massa():
             # 4. Gera Cards HTML
             for client in clients_meta:
                 c_key = client['key']
+                c_name = client['name']
                 
                 # Busca nas listas baixadas
                 out_row = next((r for r in all_out[7:] if len(r) > 1 and normalizar_id(r[1]) == c_key), None)
                 comm_row = next((r for r in all_comm if len(r) > 2 and normalizar_id(r[1]) == c_key), None)
                 
                 if out_row:
-                    # --- Preparação dos Checks ---
+                    # Checks
                     checks_data = [
                         ("FB", safe_get(out_row, 8)), ("GL", safe_get(out_row, 9)),
                         ("Mídia", safe_get(out_row, 12)), ("Emissão", safe_get(out_row, 15)),
@@ -367,31 +371,56 @@ def pagina_atualizacao_massa():
                         cls = "check-ok" if is_ok(val) else "check-nok"
                         checks_html_str += f"<div class='mass-check-box {cls}'>{name}<br>{val}</div>"
 
-                    # --- Preparação dos Valores ---
+                    # Valores
                     val_meta = str(safe_get(out_row, 24)).replace("R$", "").strip()
                     val_google = str(safe_get(out_row, 36)).replace("R$", "").strip()
                     txt_meta = safe_get(out_row, 27)
                     txt_google = safe_get(out_row, 39)
 
-                    # --- Preparação dos Botões ---
+                    # Botões (Lógica REPLICADA DA INDIVIDUAL)
                     btns_html = ""
                     if comm_row:
-                         val_col_j = str(comm_row[9]).strip() # Phone
-                         val_col_i = str(comm_row[8]).strip() # Mail
+                         val_col_c = str(comm_row[2]).strip()
+                         val_col_g = str(comm_row[6]).strip()
+                         val_col_i = str(comm_row[8]).strip()
+                         val_col_j = str(comm_row[9]).strip()
                          
+                         # --- Lógica WPP ---
                          if val_col_j and val_col_j not in ["-", "0", ""]:
-                             link = f"https://wa.me/{val_col_j}?text={urllib.parse.quote('Olá...')}"
+                             # Texto idêntico à aba individual
+                             texto_wpp = (
+                                f"Olá, {val_col_g}!\n\n"
+                                f"Foram enviados no e-mail {val_col_i}, os boletos das plataformas de anúncios.\n\n"
+                                f"*Observações importantes:*\n"
+                                f"1. Não conseguimos alterar a data de vencimento dos boletos.\n"
+                                f"2. *De maneira alguma, realize o pagamento de boletos vencidos.*\n\n"
+                                f"Qualquer dúvida, estou à disposição!"
+                             )
+                             link = f"https://wa.me/{val_col_j}?text={urllib.parse.quote(texto_wpp)}"
                              btns_html += f"<a href='{link}' target='_blank' style='text-decoration:none; flex:1;'><button style='background-color:#238636;color:white;border:none;padding:12px;border-radius:6px;width:100%;cursor:pointer;font-weight:bold;margin-right:5px;'>WhatsApp</button></a>"
                          
+                         # --- Lógica Gmail ---
                          if val_col_i and "@" in val_col_i:
-                             link = f"mailto:{val_col_i}"
+                             agora = datetime.now()
+                             data_ref = agora.strftime("%m - %Y")
+                             assunto = f"Boleto Anúncios - {val_col_c} | Ref. {data_ref}"
+                             corpo_email = (
+                                f"Olá,\n\n"
+                                f"Envio anexos os boletos referentes às plataformas de mídia paga.\n\n"
+                                f"Observações importantes:\n"
+                                f"1. Não é possível editar a data de vencimento do boleto.\n"
+                                f"2. De maneira alguma, realize o pagamento de boletos vencidos.\n\n"
+                                f"Atenciosamente,"
+                             )
+                             params = {"view": "cm", "fs": "1", "to": val_col_i, "cc": "financeiro@comodoplanejados.com.br", "su": assunto, "body": corpo_email}
+                             qs = urllib.parse.urlencode(params, quote_via=urllib.parse.quote)
+                             link = f"https://mail.google.com/mail/?{qs}"
                              btns_html += f"<a href='{link}' target='_blank' style='text-decoration:none; flex:1;'><button style='background-color:#cf222e;color:white;border:none;padding:12px;border-radius:6px;width:100%;cursor:pointer;font-weight:bold;margin-left:5px;'>Gmail</button></a>"
 
-                    # --- Montagem Final do HTML ---
-                    # Usamos f-string normal aqui, garantindo que st.markdown receba HTML puro
+                    # HTML Card
                     html_card = f"""
                     <div class="mass-card">
-                        <div class="mass-title">{client['name']}</div>
+                        <div class="mass-title">{c_name}</div>
                         <div style="font-size:0.8em; margin-bottom:5px; color:#aaa;">📊 Auditoria de Cheques</div>
                         <div class="mass-checks-grid">
                             {checks_html_str}
@@ -416,7 +445,7 @@ def pagina_atualizacao_massa():
                     """
                     st.markdown(html_card, unsafe_allow_html=True)
                     
-                    # Atualiza Output Trigger (para garantir consistencia na planilha também)
+                    # Trigger visual Output
                     match_idx_out = -1
                     for idx, r in enumerate(all_out[7:]):
                          if len(r) > 1 and normalizar_id(r[1]) == c_key:

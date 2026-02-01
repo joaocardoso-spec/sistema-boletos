@@ -7,7 +7,7 @@ import urllib.parse
 from datetime import datetime
 
 # --- CONFIGURAÇÃO GLOBAL ---
-st.set_page_config(page_title="Sistema de Boletos v3.3", layout="wide")
+st.set_page_config(page_title="Sistema de Boletos v3.4", layout="wide")
 
 # CSS OTIMIZADO
 st.markdown("""
@@ -47,7 +47,7 @@ st.markdown("""
         display: flex;
         flex-direction: column;
         justify-content: center;
-        min-height: 60px; /* Aumentei um pouco para caber a explicação */
+        min-height: 60px;
         word-wrap: break-word;
     }
     .check-ok { background-color: #1a7f37; border: 1px solid #2ea043; }
@@ -114,7 +114,7 @@ except Exception as e:
 
 
 # ==============================================================================
-# TELA 1: LANÇAMENTO INDIVIDUAL (Intacta)
+# TELA 1: LANÇAMENTO INDIVIDUAL (Texto Gmail Corrigido)
 # ==============================================================================
 def pagina_lancamento():
     st.title("🏦 Gestor de Boletos - Lançamento Individual")
@@ -244,9 +244,15 @@ def pagina_lancamento():
                                     agora = datetime.now()
                                     data_ref = agora.strftime("%m - %Y")
                                     assunto = f"Boleto Anúncios - {val_col_c} | Ref. {data_ref}"
+                                    # CORREÇÃO: TEXTO COMPLETO DO GMAIL
                                     corpo_email = (
                                         f"Olá,\n\n"
                                         f"Envio anexos os boletos referentes às plataformas de mídia paga.\n\n"
+                                        f"Observações importantes:\n"
+                                        f"1. Não é possível editar a data de vencimento do boleto gerado na plataforma e, por isto, pedimos para que o pagamento seja feito o mais rápido possível.\n"
+                                        f"2. De maneira alguma, realize o pagamento de boletos vencidos, sob pena de perder o valor adicionado indefinidamente.\n\n"
+                                        f"Ficamos à disposição para quaisquer esclarecimentos.\n\n"
+                                        f"Obrigada!\n\n"
                                         f"Atenciosamente,"
                                     )
                                     params = {"view": "cm", "fs": "1", "to": val_col_i, "cc": "financeiro@comodoplanejados.com.br", "su": assunto, "body": corpo_email}
@@ -264,7 +270,7 @@ def pagina_lancamento():
 
 
 # ==============================================================================
-# TELA 2: ATUALIZAÇÃO EM MASSA (Ajustes Visuais e Lógicos)
+# TELA 2: ATUALIZAÇÃO EM MASSA (Status Aberto por Padrão)
 # ==============================================================================
 def pagina_atualizacao_massa():
     st.title("🚀 Atualização em Massa - Boletos")
@@ -289,7 +295,6 @@ def pagina_atualizacao_massa():
     inputs = {}
     with st.form("form_massa"):
         for i, row in df_filtered.iterrows():
-            # AJUSTE 1: Expanded=False por padrão
             with st.expander(f"👤 {row['Clientes']}", expanded=False):
                 c1, c2 = st.columns(2)
                 row_key = str(i)
@@ -343,7 +348,9 @@ def pagina_atualizacao_massa():
             status.write("Baixando resultados...")
             all_out = sheets["output"].get_all_values()
             all_comm = sheets["comm"].get_all_values()
-            status.update(label="Concluído!", state="complete", expanded=False)
+            
+            # CORREÇÃO: expanded=True para que o status fique aberto no final
+            status.update(label="Concluído!", state="complete", expanded=True)
 
             st.divider()
             st.markdown("## 🎉 Resultados")
@@ -358,8 +365,7 @@ def pagina_atualizacao_massa():
                 comm_row = next((r for r in all_comm if len(r) > 2 and normalizar_id(r[1]) == c_key), None)
                 
                 if out_row:
-                    # AJUSTE 3: Preparação dos Checks com Explicação Detalhada
-                    # Recuperando valores para explicar o NOK
+                    # Preparação dos Checks
                     val_c2 = safe_get(out_row, 12)
                     diff_c2 = f"Acordado: {safe_get(out_row, 10)}<br>Lançado: {safe_get(out_row, 11)}" if not is_ok(val_c2) else ""
 
@@ -372,7 +378,6 @@ def pagina_atualizacao_massa():
                     val_c4g = safe_get(out_row, 19)
                     diff_c4g = "Saldo baixo" if not is_ok(val_c4g) else ""
                     
-                    # Lista de Tuplas: (Nome, Valor, Explicação)
                     checks_data = [
                         ("FB", safe_get(out_row, 8), ""), 
                         ("GL", safe_get(out_row, 9), ""),
@@ -384,16 +389,12 @@ def pagina_atualizacao_massa():
                     
                     checks_html_str = ""
                     for name, val, diff in checks_data:
-                        # AJUSTE 2: Lógica Visual. Para FB/GL, Vazio = OK.
                         if name in ["FB", "GL"]:
-                            # Se for nulo, string vazia ou OK, fica verde.
                             cls = "check-ok" if (not val or str(val).strip() == "" or is_ok(val)) else "check-nok"
                         else:
                             cls = "check-ok" if is_ok(val) else "check-nok"
                         
-                        # Adiciona a explicação se houver (letra pequena)
                         diff_html = f"<div style='font-size:0.65em; margin-top:3px; line-height:1.1; opacity:0.9;'>{diff}</div>" if diff else ""
-                        
                         checks_html_str += f"<div class='mass-check-box {cls}'>{name}<br>{val}{diff_html}</div>"
 
                     # Valores
@@ -430,8 +431,10 @@ def pagina_atualizacao_massa():
                                 f"Olá,\n\n"
                                 f"Envio anexos os boletos referentes às plataformas de mídia paga.\n\n"
                                 f"Observações importantes:\n"
-                                f"1. Não é possível editar a data de vencimento do boleto.\n"
-                                f"2. De maneira alguma, realize o pagamento de boletos vencidos.\n\n"
+                                f"1. Não é possível editar a data de vencimento do boleto gerado na plataforma e, por isto, pedimos para que o pagamento seja feito o mais rápido possível.\n"
+                                f"2. De maneira alguma, realize o pagamento de boletos vencidos, sob pena de perder o valor adicionado indefinidamente.\n\n"
+                                f"Ficamos à disposição para quaisquer esclarecimentos.\n\n"
+                                f"Obrigada!\n\n"
                                 f"Atenciosamente,"
                              )
                              params = {"view": "cm", "fs": "1", "to": val_col_i, "cc": "financeiro@comodoplanejados.com.br", "su": assunto, "body": corpo_email}
